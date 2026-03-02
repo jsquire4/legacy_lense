@@ -13,25 +13,12 @@
         }
         h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; text-align: center; }
         .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center; }
-        .container { width: 100%; max-width: 1400px; margin: 0 auto; }
-
-        /* Two-column layout: left = chat + obs, right = evals + arch */
-        .layout {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1.5rem;
-            align-items: start;
-        }
-        .col-left, .col-right { min-width: 0; }
-
-        @media (max-width: 900px) {
-            .layout { grid-template-columns: 1fr; }
-        }
+        .container { width: 100%; max-width: 900px; margin: 0 auto; }
 
         /* Panels */
         .panel {
             background: #161b22; border: 1px solid #30363d;
-            border-radius: 6px; padding: 1.25rem; margin-bottom: 1rem;
+            border-radius: 6px; padding: 1.25rem; margin-bottom: 1.5rem;
         }
         .panel-title {
             color: #58a6ff; font-size: 0.95rem; font-weight: 700;
@@ -120,29 +107,65 @@
         .eval-controls {
             display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
         }
-        .eval-controls button {
-            padding: 0.5rem 1rem; font-size: 0.85rem;
-        }
+        .eval-controls button { padding: 0.5rem 1rem; font-size: 0.85rem; }
         .eval-status { color: #8b949e; font-size: 0.8rem; }
         .eval-metrics { margin-bottom: 0.75rem; }
-        .eval-rows { max-height: 350px; overflow-y: auto; }
-        .eval-row {
+        .eval-rows { max-height: 600px; overflow-y: auto; }
+
+        /* Eval accordion rows */
+        .eval-item { border-bottom: 1px solid #21262d; }
+        .eval-header {
             display: grid; grid-template-columns: 1fr auto auto auto;
-            gap: 0.4rem; padding: 0.35rem 0; border-bottom: 1px solid #21262d;
-            font-size: 0.78rem; align-items: center;
+            gap: 0.5rem; padding: 0.5rem 0.25rem; font-size: 0.78rem;
+            align-items: center; cursor: pointer; user-select: none;
         }
-        .eval-row .eval-q {
+        .eval-header:hover { background: #21262d44; }
+        .eval-header .eval-q {
             color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
-        .eval-row .eval-score { font-family: monospace; font-weight: 600; }
+        .eval-header .eval-score { font-family: monospace; font-weight: 600; }
         .eval-score.pass { color: #3fb950; }
         .eval-score.fail { color: #f85149; }
-        .eval-row .eval-ms { color: #8b949e; font-size: 0.72rem; }
-        .eval-row .eval-cap {
+        .eval-header .eval-ms { color: #8b949e; font-size: 0.72rem; }
+        .eval-cap {
             font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 3px;
             background: #1f6feb33; color: #58a6ff; font-weight: 600; white-space: nowrap;
         }
         .eval-cap.cap-null { background: #8b949e22; color: #8b949e; }
+
+        .eval-details {
+            display: none; padding: 0.5rem 0.25rem 0.75rem;
+            font-size: 0.78rem; border-top: 1px solid #21262d;
+            background: #0d111766;
+        }
+        .eval-details.open { display: block; }
+        .eval-details .detail-section { margin-bottom: 0.5rem; }
+        .eval-details .detail-label {
+            color: #8b949e; font-size: 0.72rem; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.2rem;
+        }
+        .eval-details .file-list {
+            display: flex; gap: 0.3rem; flex-wrap: wrap;
+        }
+        .eval-details .file-tag {
+            font-family: monospace; font-size: 0.72rem;
+            padding: 0.1rem 0.4rem; border-radius: 3px;
+        }
+        .file-tag.found { background: #23863633; color: #3fb950; }
+        .file-tag.missing { background: #f8514933; color: #f85149; }
+        .file-tag.retrieved { background: #21262d; color: #c9d1d9; }
+        .eval-details .answer-preview {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+            padding: 0.5rem; font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.72rem; line-height: 1.4; white-space: pre-wrap;
+            max-height: 200px; overflow-y: auto; color: #8b949e;
+        }
+        .eval-details .check-list { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .eval-details .check-item {
+            font-size: 0.72rem; padding: 0.15rem 0.4rem; border-radius: 3px;
+        }
+        .check-item.check-pass { background: #23863633; color: #3fb950; }
+        .check-item.check-fail { background: #f8514933; color: #f85149; }
 
         /* Architecture */
         .arch-section { margin-bottom: 1.5rem; }
@@ -162,7 +185,7 @@
         .pipeline-step .step-tech { color: #8b949e; font-size: 0.72rem; margin-top: 0.2rem; }
         .pipeline-arrow { color: #30363d; font-size: 1.2rem; padding: 0 0.3rem; }
         .stats-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 0.75rem; margin-top: 0.75rem;
         }
         .stat-card {
@@ -185,206 +208,146 @@
         <h1>LegacyLens</h1>
         <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
 
-        <div class="layout">
-            <!-- LEFT: Chat + Observability -->
-            <div class="col-left">
-                <div class="capabilities">
-                    <button class="cap-btn active" data-cap="">General Query</button>
-                    <button class="cap-btn" data-cap="explain_code">Explain Code</button>
-                    <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
-                    <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
-                    <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
-                    <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
-                    <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
+        <!-- Query -->
+        <div class="capabilities">
+            <button class="cap-btn active" data-cap="">General Query</button>
+            <button class="cap-btn" data-cap="explain_code">Explain Code</button>
+            <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
+            <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
+            <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
+            <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
+            <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
+        </div>
+
+        <div class="input-group">
+            <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
+            <button id="submit" onclick="submitQuery()">Ask</button>
+        </div>
+
+        <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
+
+        <div class="result" id="result">
+            <pre id="answer"></pre>
+            <div class="citations" id="citations-box">
+                <h3>Sources</h3>
+                <div id="citations"></div>
+            </div>
+            <div class="meta" id="meta"></div>
+        </div>
+
+        <!-- Observability -->
+        <div class="panel">
+            <h2 class="panel-title">Observability</h2>
+            <div id="obs-empty" class="obs-empty">Run a query to see details</div>
+            <div class="obs-panel" id="obs-content" style="display:none">
+                <h4>Timing</h4>
+                <div class="obs-stats" id="obs-timing"></div>
+                <h4>Token Usage</h4>
+                <div class="obs-stats" id="obs-tokens"></div>
+                <div id="obs-expansion-section" style="display:none;">
+                    <h4>Query Expansion</h4>
+                    <div class="expansion-names" id="obs-expansion"></div>
                 </div>
+                <h4>Retrieved Chunks</h4>
+                <table>
+                    <thead>
+                        <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
+                    </thead>
+                    <tbody id="obs-chunks"></tbody>
+                </table>
+            </div>
+        </div>
 
-                <div class="input-group">
-                    <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
-                    <button id="submit" onclick="submitQuery()">Ask</button>
-                </div>
-
-                <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
-
-                <div class="result" id="result">
-                    <pre id="answer"></pre>
-                    <div class="citations" id="citations-box">
-                        <h3>Sources</h3>
-                        <div id="citations"></div>
-                    </div>
-                    <div class="meta" id="meta"></div>
-                </div>
-
-                <div class="panel" style="margin-top:1rem">
-                    <h2 class="panel-title">Observability</h2>
-                    <div id="obs-empty" class="obs-empty">Run a query to see details</div>
-                    <div class="obs-panel" id="obs-content" style="display:none">
-                        <h4>Timing</h4>
-                        <div class="obs-stats" id="obs-timing"></div>
-
-                        <h4>Token Usage</h4>
-                        <div class="obs-stats" id="obs-tokens"></div>
-
-                        <div id="obs-expansion-section" style="display:none;">
-                            <h4>Query Expansion</h4>
-                            <div class="expansion-names" id="obs-expansion"></div>
-                        </div>
-
-                        <h4>Retrieved Chunks</h4>
-                        <table>
-                            <thead>
-                                <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
-                            </thead>
-                            <tbody id="obs-chunks"></tbody>
-                        </table>
-                    </div>
+        <!-- Retrieval Evals -->
+        <div class="panel">
+            <h2 class="panel-title">Retrieval Evals</h2>
+            <div class="eval-controls">
+                <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
+                <span class="eval-status" id="eval-status"></span>
+            </div>
+            <div class="eval-metrics" id="eval-metrics" style="display:none">
+                <div class="obs-stats">
+                    <div class="stat"><span class="stat-value" id="eval-recall">—</span><span>Recall@5</span></div>
+                    <div class="stat"><span class="stat-value" id="eval-latency">—</span><span>Avg Latency</span></div>
+                    <div class="stat"><span class="stat-value" id="eval-progress">—</span><span>Queries</span></div>
                 </div>
             </div>
+            <div class="eval-rows" id="eval-rows"></div>
+        </div>
 
-            <!-- RIGHT: Evals + Architecture -->
-            <div class="col-right">
-                <!-- Retrieval Evals -->
-                <div class="panel">
-                    <h2 class="panel-title">Retrieval Evals</h2>
-                    <div class="eval-controls">
-                        <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
-                        <span class="eval-status" id="eval-status"></span>
-                    </div>
-                    <div class="eval-metrics" id="eval-metrics" style="display:none">
-                        <div class="obs-stats">
-                            <div class="stat">
-                                <span class="stat-value" id="eval-recall">—</span>
-                                <span>Recall@5</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value" id="eval-latency">—</span>
-                                <span>Avg Latency</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value" id="eval-progress">—</span>
-                                <span>Queries</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="eval-rows" id="eval-rows"></div>
+        <!-- E2E Generation Evals -->
+        <div class="panel">
+            <h2 class="panel-title">E2E Generation Evals</h2>
+            <div class="eval-controls">
+                <button id="e2e-btn" onclick="runE2EEvals()">Run E2E</button>
+                <span class="eval-status" id="e2e-status"></span>
+            </div>
+            <div class="eval-metrics" id="e2e-metrics" style="display:none">
+                <div class="obs-stats">
+                    <div class="stat"><span class="stat-value" id="e2e-pass-rate">—</span><span>Pass Rate</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-latency">—</span><span>Avg Latency</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-progress">—</span><span>Queries</span></div>
                 </div>
+            </div>
+            <div class="eval-rows" id="e2e-rows"></div>
+        </div>
 
-                <!-- E2E Generation Evals -->
-                <div class="panel">
-                    <h2 class="panel-title">E2E Generation Evals</h2>
-                    <div class="eval-controls">
-                        <button id="e2e-btn" onclick="runE2EEvals()">Run E2E</button>
-                        <span class="eval-status" id="e2e-status"></span>
-                    </div>
-                    <div class="eval-metrics" id="e2e-metrics" style="display:none">
-                        <div class="obs-stats">
-                            <div class="stat">
-                                <span class="stat-value" id="e2e-pass-rate">—</span>
-                                <span>Pass Rate</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value" id="e2e-latency">—</span>
-                                <span>Avg Latency</span>
-                            </div>
-                            <div class="stat">
-                                <span class="stat-value" id="e2e-progress">—</span>
-                                <span>Queries</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="eval-rows" id="e2e-rows"></div>
+        <!-- Architecture -->
+        <div class="panel">
+            <h2 class="panel-title">Architecture</h2>
+            <div class="arch-section">
+                <h3>RAG Pipeline</h3>
+                <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
+                <div class="pipeline">
+                    <div class="pipeline-step"><div class="step-title">Query</div><div class="step-tech">User NL input</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Embed</div><div class="step-tech">text-embedding-3-small</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Hybrid Search</div><div class="step-tech">Vector + Name match</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Context</div><div class="step-tech">6K token budget</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Generate</div><div class="step-tech">gpt-4o-mini</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Response</div><div class="step-tech">Citations enforced</div></div>
                 </div>
-
-                <div class="panel">
-                    <h2 class="panel-title">Architecture</h2>
-                    <div class="arch-section">
-                        <h3>RAG Pipeline</h3>
-                        <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
-                        <div class="pipeline">
-                            <div class="pipeline-step">
-                                <div class="step-title">Query</div>
-                                <div class="step-tech">User NL input</div>
-                            </div>
-                            <span class="pipeline-arrow">&#8594;</span>
-                            <div class="pipeline-step">
-                                <div class="step-title">Embed</div>
-                                <div class="step-tech">text-embedding-3-small</div>
-                            </div>
-                            <span class="pipeline-arrow">&#8594;</span>
-                            <div class="pipeline-step">
-                                <div class="step-title">Hybrid Search</div>
-                                <div class="step-tech">Vector + Name match</div>
-                            </div>
-                            <span class="pipeline-arrow">&#8594;</span>
-                            <div class="pipeline-step">
-                                <div class="step-title">Context</div>
-                                <div class="step-tech">6K token budget</div>
-                            </div>
-                            <span class="pipeline-arrow">&#8594;</span>
-                            <div class="pipeline-step">
-                                <div class="step-title">Generate</div>
-                                <div class="step-tech">gpt-4o-mini</div>
-                            </div>
-                            <span class="pipeline-arrow">&#8594;</span>
-                            <div class="pipeline-step">
-                                <div class="step-title">Response</div>
-                                <div class="step-tech">Citations enforced</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="arch-section">
-                        <h3>Key Stats</h3>
-                        <div class="stats-grid">
-                            <div class="stat-card">
-                                <div class="stat-num">2,272</div>
-                                <div class="stat-label">Fortran files indexed</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-num">2,334</div>
-                                <div class="stat-label">Chunks stored</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-num">0.96</div>
-                                <div class="stat-label">Recall@5</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-num">&lt;3s</div>
-                                <div class="stat-label">End-to-end latency</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="arch-section">
-                        <h3>Retrieval Strategy</h3>
-                        <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
-                        <ul class="component-list">
-                            <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
-                            <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
-                            <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
-                            <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
-                        </ul>
-                    </div>
-
-                    <div class="arch-section">
-                        <h3>Components</h3>
-                        <ul class="component-list">
-                            <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
-                            <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
-                            <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
-                            <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
-                            <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
-                        </ul>
-                    </div>
-
-                    <div class="arch-section">
-                        <h3>Deployment</h3>
-                        <ul class="component-list">
-                            <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
-                            <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
-                            <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
-                        </ul>
-                    </div>
+            </div>
+            <div class="arch-section">
+                <h3>Key Stats</h3>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-num">2,272</div><div class="stat-label">Fortran files indexed</div></div>
+                    <div class="stat-card"><div class="stat-num">2,334</div><div class="stat-label">Chunks stored</div></div>
+                    <div class="stat-card"><div class="stat-num">0.96</div><div class="stat-label">Recall@5</div></div>
+                    <div class="stat-card"><div class="stat-num">&lt;2s</div><div class="stat-label">Retrieval latency</div></div>
                 </div>
+            </div>
+            <div class="arch-section">
+                <h3>Retrieval Strategy</h3>
+                <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
+                <ul class="component-list">
+                    <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
+                    <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
+                    <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
+                    <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
+                </ul>
+            </div>
+            <div class="arch-section">
+                <h3>Components</h3>
+                <ul class="component-list">
+                    <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
+                    <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
+                    <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
+                    <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
+                    <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
+                </ul>
+            </div>
+            <div class="arch-section">
+                <h3>Deployment</h3>
+                <ul class="component-list">
+                    <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
+                    <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
+                    <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
+                </ul>
             </div>
         </div>
     </div>
@@ -392,7 +355,6 @@
     <script>
         let selectedCapability = "";
 
-        // Capability selection
         document.querySelectorAll(".cap-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 document.querySelectorAll(".cap-btn").forEach(b => b.classList.remove("active"));
@@ -402,10 +364,7 @@
         });
 
         document.getElementById("query").addEventListener("keydown", e => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submitQuery();
-            }
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuery(); }
         });
 
         function badgeClass(matchType) {
@@ -413,66 +372,44 @@
             return map[matchType] || "badge-vector";
         }
 
+        function capLabel(cap) { return cap ? cap.replace(/_/g, " ") : "general"; }
+
+        function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
         function renderObservability(data) {
-            // Timing
             const timing = data.timing || {};
             document.getElementById("obs-timing").innerHTML = [
-                ["Retrieval", timing.retrieval_ms],
-                ["Generation", timing.generation_ms],
-                ["Total", timing.total_ms],
-            ].map(([label, val]) =>
-                `<div class="stat"><span class="stat-value">${val != null ? val.toFixed(0) + 'ms' : '—'}</span><span>${label}</span></div>`
-            ).join("");
+                ["Retrieval", timing.retrieval_ms], ["Generation", timing.generation_ms], ["Total", timing.total_ms],
+            ].map(([l, v]) => `<div class="stat"><span class="stat-value">${v != null ? v.toFixed(0)+'ms' : '—'}</span><span>${l}</span></div>`).join("");
 
-            // Tokens
             const tok = data.token_usage || {};
             document.getElementById("obs-tokens").innerHTML = [
-                ["Prompt", tok.prompt_tokens],
-                ["Completion", tok.completion_tokens],
-                ["Total", tok.total_tokens],
-            ].map(([label, val]) =>
-                `<div class="stat"><span class="stat-value">${val != null ? val.toLocaleString() : '—'}</span><span>${label}</span></div>`
-            ).join("");
+                ["Prompt", tok.prompt_tokens], ["Completion", tok.completion_tokens], ["Total", tok.total_tokens],
+            ].map(([l, v]) => `<div class="stat"><span class="stat-value">${v != null ? v.toLocaleString() : '—'}</span><span>${l}</span></div>`).join("");
 
-            // Expansion
             const rd = data.retrieval_details || {};
             const expSection = document.getElementById("obs-expansion-section");
-            const expDiv = document.getElementById("obs-expansion");
             if (rd.expanded_names && rd.expanded_names.length > 0) {
                 expSection.style.display = "block";
-                expDiv.innerHTML = rd.expanded_names.map(n => `<span>${n}</span>`).join("");
-            } else {
-                expSection.style.display = "none";
-            }
+                document.getElementById("obs-expansion").innerHTML = rd.expanded_names.map(n => `<span>${n}</span>`).join("");
+            } else { expSection.style.display = "none"; }
 
-            // Chunks table
-            const tbody = document.getElementById("obs-chunks");
             const chunks = (rd.chunks || []);
-            tbody.innerHTML = chunks.map(c =>
-                `<tr>
-                    <td>${c.rank}</td>
-                    <td style="font-family:monospace;font-size:0.78rem">${c.file_name}</td>
-                    <td style="font-family:monospace;font-size:0.78rem">${c.routine_name}</td>
-                    <td>${c.score.toFixed(4)}</td>
-                    <td><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></td>
-                </tr>`
+            document.getElementById("obs-chunks").innerHTML = chunks.map(c =>
+                `<tr><td>${c.rank}</td><td style="font-family:monospace;font-size:0.78rem">${c.file_name}</td><td style="font-family:monospace;font-size:0.78rem">${c.routine_name}</td><td>${c.score.toFixed(4)}</td><td><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></td></tr>`
             ).join("");
         }
 
         function parseSSE(text) {
             const events = [];
-            const blocks = text.split("\n\n");
-            for (const block of blocks) {
+            for (const block of text.split("\n\n")) {
                 if (!block.trim()) continue;
                 let event = "", data = "";
                 for (const line of block.split("\n")) {
                     if (line.startsWith("event: ")) event = line.slice(7);
                     else if (line.startsWith("data: ")) data = line.slice(6);
                 }
-                if (event && data) {
-                    try { events.push({ event, data: JSON.parse(data) }); }
-                    catch {}
-                }
+                if (event && data) { try { events.push({ event, data: JSON.parse(data) }); } catch {} }
             }
             return events;
         }
@@ -482,16 +419,118 @@
             const remainder = parts.pop();
             for (const part of parts) {
                 if (!part.trim()) continue;
-                const events = parseSSE(part + "\n\n");
-                for (const evt of events) handler(evt);
+                for (const evt of parseSSE(part + "\n\n")) handler(evt);
             }
             return remainder;
+        }
+
+        async function readSSE(url, method, body, handler) {
+            const opts = { method };
+            if (body) { opts.headers = { "Content-Type": "application/json" }; opts.body = JSON.stringify(body); }
+            const res = await fetch(url, opts);
+            if (!res.ok) { const e = await res.json(); throw new Error(e.detail || `HTTP ${res.status}`); }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                buffer = processSSEBuffer(buffer, handler);
+            }
+        }
+
+        // --- Retrieval eval row builder ---
+        function buildRetrievalRow(data) {
+            const item = document.createElement("div");
+            item.className = "eval-item";
+            const capClass = data.capability ? "" : " cap-null";
+            const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
+
+            // Build file comparison
+            const expected = new Set(data.expected_files || []);
+            const retrieved = data.retrieved_files || [];
+            const foundFiles = retrieved.filter(f => expected.has(f));
+            const missingFiles = [...expected].filter(f => !retrieved.includes(f));
+            const extraFiles = retrieved.filter(f => !expected.has(f));
+
+            item.innerHTML = `
+                <div class="eval-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                    <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
+                    <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
+                    <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
+                    <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
+                </div>
+                <div class="eval-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Expected Files</div>
+                        <div class="file-list">
+                            ${[...expected].map(f => {
+                                const cls = foundFiles.includes(f) ? "found" : "missing";
+                                return `<span class="file-tag ${cls}">${cls === "found" ? "&#10003;" : "&#10007;"} ${f}</span>`;
+                            }).join("")}
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Retrieved Files (top 5)</div>
+                        <div class="file-list">
+                            ${retrieved.map(f => `<span class="file-tag retrieved">${f}</span>`).join("")}
+                        </div>
+                    </div>
+                </div>
+            `;
+            return item;
+        }
+
+        // --- E2E eval row builder ---
+        function buildE2ERow(data) {
+            const item = document.createElement("div");
+            item.className = "eval-item";
+            const capClass = data.capability ? "" : " cap-null";
+            const passClass = data.passed ? "pass" : "fail";
+            const checks = data.checks || {};
+
+            const checkItems = [];
+            if ("has_citations" in checks)
+                checkItems.push(`<span class="check-item ${checks.has_citations ? "check-pass" : "check-fail"}">citations: ${checks.has_citations ? "yes" : "no"}</span>`);
+            if ("min_answer_length" in checks)
+                checkItems.push(`<span class="check-item ${checks.min_answer_length ? "check-pass" : "check-fail"}">length: ${data.answer_length} chars</span>`);
+            if ("keywords_pass" in checks) {
+                const found = (checks.keywords_found || []).join(", ") || "none";
+                checkItems.push(`<span class="check-item ${checks.keywords_pass ? "check-pass" : "check-fail"}">keywords: ${found}</span>`);
+            }
+
+            const citations = (data.citations || []).map(c => `<span class="file-tag retrieved">${escHtml(c)}</span>`).join("");
+            const preview = escHtml(data.answer_preview || "");
+
+            item.innerHTML = `
+                <div class="eval-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                    <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
+                    <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
+                    <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
+                    <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
+                </div>
+                <div class="eval-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Quality Checks</div>
+                        <div class="check-list">${checkItems.join("")}</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Citations</div>
+                        <div class="file-list">${citations || '<span style="color:#8b949e">none</span>'}</div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-label">Answer Preview</div>
+                        <div class="answer-preview">${preview}</div>
+                    </div>
+                </div>
+            `;
+            return item;
         }
 
         async function submitQuery() {
             const query = document.getElementById("query").value.trim();
             if (!query) return;
-
             const submitBtn = document.getElementById("submit");
             const spinner = document.getElementById("spinner");
             const resultDiv = document.getElementById("result");
@@ -508,79 +547,29 @@
             document.getElementById("meta").textContent = "";
 
             try {
-                const url = selectedCapability
-                    ? `/api/capabilities/${selectedCapability}/stream`
-                    : "/api/query/stream";
-
-                const res = await fetch(url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ query }),
-                });
-
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || `HTTP ${res.status}`);
-                }
-
-                resultDiv.classList.add("visible");
-
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
-                        if (event === "retrieval") {
-                            spinner.classList.remove("visible");
-                            document.getElementById("obs-empty").style.display = "none";
-                            document.getElementById("obs-content").style.display = "block";
-                            renderObservability({
-                                retrieval_details: data.retrieval_details,
-                                timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null },
-                                token_usage: {},
-                            });
-                        } else if (event === "token") {
-                            answerEl.textContent += data.token;
-                        } else if (event === "done") {
-                            if (data.citations && data.citations.length > 0) {
-                                citationsBox.style.display = "block";
-                                data.citations.forEach(c => {
-                                    const span = document.createElement("span");
-                                    span.textContent = c;
-                                    citationsDiv.appendChild(span);
-                                });
-                            }
-                            document.getElementById("meta").textContent =
-                                `Latency: ${data.timing.total_ms}ms`;
-                            renderObservability({
-                                retrieval_details: null,
-                                timing: data.timing,
-                                token_usage: data.token_usage,
-                            });
+                const url = selectedCapability ? `/api/capabilities/${selectedCapability}/stream` : "/api/query/stream";
+                await readSSE(url, "POST", { query }, ({ event, data }) => {
+                    if (event === "retrieval") {
+                        spinner.classList.remove("visible");
+                        resultDiv.classList.add("visible");
+                        document.getElementById("obs-empty").style.display = "none";
+                        document.getElementById("obs-content").style.display = "block";
+                        renderObservability({ retrieval_details: data.retrieval_details, timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null }, token_usage: {} });
+                    } else if (event === "token") {
+                        answerEl.textContent += data.token;
+                    } else if (event === "done") {
+                        if (data.citations && data.citations.length > 0) {
+                            citationsBox.style.display = "block";
+                            data.citations.forEach(c => { const s = document.createElement("span"); s.textContent = c; citationsDiv.appendChild(s); });
                         }
-                    });
-                }
+                        document.getElementById("meta").textContent = `Latency: ${data.timing.total_ms}ms`;
+                        renderObservability({ retrieval_details: null, timing: data.timing, token_usage: data.token_usage });
+                    }
+                });
             } catch (err) {
-                const errorSpan = document.createElement("span");
-                errorSpan.className = "error";
-                errorSpan.textContent = `Error: ${err.message}`;
-                answerEl.textContent = "";
-                answerEl.appendChild(errorSpan);
-                resultDiv.classList.add("visible");
-            } finally {
-                submitBtn.disabled = false;
-                spinner.classList.remove("visible");
-            }
-        }
-
-        function capLabel(cap) {
-            if (!cap) return "general";
-            return cap.replace(/_/g, " ");
+                const s = document.createElement("span"); s.className = "error"; s.textContent = `Error: ${err.message}`;
+                answerEl.textContent = ""; answerEl.appendChild(s); resultDiv.classList.add("visible");
+            } finally { submitBtn.disabled = false; spinner.classList.remove("visible"); }
         }
 
         async function runEvals() {
@@ -592,67 +581,31 @@
             const latencyEl = document.getElementById("eval-latency");
             const progressEl = document.getElementById("eval-progress");
 
-            btn.disabled = true;
-            statusEl.textContent = "Running...";
-            metricsDiv.style.display = "block";
-            rowsDiv.innerHTML = "";
-            recallEl.textContent = "—";
-            latencyEl.textContent = "—";
-            progressEl.textContent = "—";
+            btn.disabled = true; statusEl.textContent = "Running...";
+            metricsDiv.style.display = "block"; rowsDiv.innerHTML = "";
+            recallEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
 
-            let runningRecall = 0;
-            let runningLatency = 0;
-            let completed = 0;
-            let total = 0;
-
+            let runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
             try {
-                const res = await fetch("/api/eval/stream");
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
-                        if (event === "progress") {
-                            completed++;
-                            runningRecall += data.recall_at_5;
-                            runningLatency += data.latency_ms;
-
-                            recallEl.textContent = (runningRecall / completed).toFixed(3);
-                            latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
-                            progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
-
-                            const capClass = data.capability ? "" : " cap-null";
-                            const row = document.createElement("div");
-                            row.className = "eval-row";
-                            const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
-                            row.innerHTML = `
-                                <span class="eval-q" title="${data.query}">${data.query}</span>
-                                <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
-                                <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
-                                <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
-                            `;
-                            rowsDiv.appendChild(row);
-                        } else if (event === "summary") {
-                            total = data.total_queries;
-                            recallEl.textContent = data.avg_recall_at_5.toFixed(3);
-                            latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
-                            progressEl.textContent = `${total} / ${total}`;
-                            statusEl.textContent = "Done";
-                        }
-                    });
-                }
-            } catch (err) {
-                statusEl.textContent = `Error: ${err.message}`;
-            } finally {
-                btn.disabled = false;
-            }
+                await readSSE("/api/eval/stream", "GET", null, ({ event, data }) => {
+                    if (event === "progress") {
+                        completed++;
+                        runningRecall += data.recall_at_5;
+                        runningLatency += data.latency_ms;
+                        recallEl.textContent = (runningRecall / completed).toFixed(3);
+                        latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
+                        progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
+                        rowsDiv.appendChild(buildRetrievalRow(data));
+                    } else if (event === "summary") {
+                        total = data.total_queries;
+                        recallEl.textContent = data.avg_recall_at_5.toFixed(3);
+                        latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
+                        progressEl.textContent = `${total} / ${total}`;
+                        statusEl.textContent = "Done";
+                    }
+                });
+            } catch (err) { statusEl.textContent = `Error: ${err.message}`; }
+            finally { btn.disabled = false; }
         }
 
         async function runE2EEvals() {
@@ -664,67 +617,31 @@
             const latencyEl = document.getElementById("e2e-latency");
             const progressEl = document.getElementById("e2e-progress");
 
-            btn.disabled = true;
-            statusEl.textContent = "Running...";
-            metricsDiv.style.display = "block";
-            rowsDiv.innerHTML = "";
-            passRateEl.textContent = "—";
-            latencyEl.textContent = "—";
-            progressEl.textContent = "—";
+            btn.disabled = true; statusEl.textContent = "Running...";
+            metricsDiv.style.display = "block"; rowsDiv.innerHTML = "";
+            passRateEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
 
-            let totalPassed = 0;
-            let runningLatency = 0;
-            let completed = 0;
-            let total = 0;
-
+            let totalPassed = 0, runningLatency = 0, completed = 0, total = 0;
             try {
-                const res = await fetch("/api/eval/e2e/stream");
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = "";
-
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-
-                    buffer += decoder.decode(value, { stream: true });
-                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
-                        if (event === "progress") {
-                            completed++;
-                            if (data.passed) totalPassed++;
-                            runningLatency += data.latency_ms;
-
-                            passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
-                            latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
-                            progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
-
-                            const capClass = data.capability ? "" : " cap-null";
-                            const row = document.createElement("div");
-                            row.className = "eval-row";
-                            const passClass = data.passed ? "pass" : "fail";
-                            row.innerHTML = `
-                                <span class="eval-q" title="${data.query}">${data.query}</span>
-                                <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
-                                <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
-                                <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
-                            `;
-                            rowsDiv.appendChild(row);
-                        } else if (event === "summary") {
-                            total = data.total_queries;
-                            passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
-                            latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
-                            progressEl.textContent = `${total} / ${total}`;
-                            statusEl.textContent = `Done — ${data.passed}/${total} passed`;
-                        }
-                    });
-                }
-            } catch (err) {
-                statusEl.textContent = `Error: ${err.message}`;
-            } finally {
-                btn.disabled = false;
-            }
+                await readSSE("/api/eval/e2e/stream", "GET", null, ({ event, data }) => {
+                    if (event === "progress") {
+                        completed++;
+                        if (data.passed) totalPassed++;
+                        runningLatency += data.latency_ms;
+                        passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
+                        latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
+                        progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
+                        rowsDiv.appendChild(buildE2ERow(data));
+                    } else if (event === "summary") {
+                        total = data.total_queries;
+                        passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
+                        latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
+                        progressEl.textContent = `${total} / ${total}`;
+                        statusEl.textContent = `Done — ${data.passed}/${total} passed`;
+                    }
+                });
+            } catch (err) { statusEl.textContent = `Error: ${err.message}`; }
+            finally { btn.disabled = false; }
         }
     </script>
 </body>

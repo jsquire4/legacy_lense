@@ -330,7 +330,8 @@ def _e2e_eval_stream_generator():
             "passed": check_results["pass"],
             "checks": check_results,
             "latency_ms": latency_ms,
-            "citations_count": len(gen_result["citations"]),
+            "citations": gen_result["citations"],
+            "answer_preview": gen_result["answer"][:500],
             "answer_length": len(gen_result["answer"]),
         })
 

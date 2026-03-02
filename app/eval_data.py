@@ -58,40 +58,123 @@ EVAL_QUERIES = [
 # --- E2E evals: test full retrieve+generate pipeline with quality checks ---
 
 E2E_EVAL_QUERIES = [
+    # === General ===
     {
         "query": "What does DGESV do?",
         "capability": None,
         "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["linear", "system", "solve"]},
     },
     {
+        "query": "How does singular value decomposition work in LAPACK?",
+        "capability": None,
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["singular", "value"]},
+    },
+    {
+        "query": "What is the DGEMM routine?",
+        "capability": None,
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["matrix", "multipl"]},
+    },
+
+    # === Explain Code ===
+    {
         "query": "Explain the algorithm in DGETRF step by step",
         "capability": "explain_code",
         "checks": {"has_citations": True, "min_answer_length": 100, "expected_keywords": ["factor", "pivot"]},
     },
+    {
+        "query": "Explain what DLANGE computes and how",
+        "capability": "explain_code",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["norm", "matrix"]},
+    },
+    {
+        "query": "Explain the DGEMM matrix multiplication algorithm",
+        "capability": "explain_code",
+        "checks": {"has_citations": True, "min_answer_length": 100, "expected_keywords": ["matrix", "multipl"]},
+    },
+
+    # === Generate Docs ===
     {
         "query": "Generate documentation for DPOTRF",
         "capability": "generate_docs",
         "checks": {"has_citations": True, "min_answer_length": 100, "expected_keywords": ["Cholesky", "symmetric"]},
     },
     {
+        "query": "Generate documentation for DGESVD",
+        "capability": "generate_docs",
+        "checks": {"has_citations": True, "min_answer_length": 100, "expected_keywords": ["singular", "value"]},
+    },
+    {
+        "query": "Generate documentation for DGELS",
+        "capability": "generate_docs",
+        "checks": {"has_citations": True, "min_answer_length": 100, "expected_keywords": ["least", "square"]},
+    },
+
+    # === Detect Patterns ===
+    {
         "query": "What programming patterns are used in DGESV?",
         "capability": "detect_patterns",
         "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["error", "check"]},
     },
+    {
+        "query": "Identify workspace query patterns in DSYEV",
+        "capability": "detect_patterns",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["workspace", "LWORK"]},
+    },
+    {
+        "query": "Detect loop and blocking patterns in DGEMM",
+        "capability": "detect_patterns",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["loop", "block"]},
+    },
+
+    # === Map Dependencies ===
     {
         "query": "What routines does DGESV call?",
         "capability": "map_dependencies",
         "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["DGETRF", "DGETRS"]},
     },
     {
+        "query": "What BLAS routines does DGETRF depend on?",
+        "capability": "map_dependencies",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["DGEMM", "DTRSM"]},
+    },
+    {
+        "query": "Map the dependency chain of DGELS",
+        "capability": "map_dependencies",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["DGEQRF", "DTRSM"]},
+    },
+
+    # === Impact Analysis ===
+    {
         "query": "What breaks if DGETRF is changed?",
         "capability": "impact_analysis",
         "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["DGESV"]},
     },
     {
+        "query": "What is the impact of modifying DGEMM?",
+        "capability": "impact_analysis",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["performance", "routine"]},
+    },
+    {
+        "query": "What depends on DTRSM in LAPACK?",
+        "capability": "impact_analysis",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["triangular", "solve"]},
+    },
+
+    # === Extract Business Rules ===
+    {
         "query": "What validation rules does DGESV enforce on its inputs?",
         "capability": "extract_business_rules",
         "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["INFO", "N"]},
+    },
+    {
+        "query": "What workspace size rules does DSYEV use?",
+        "capability": "extract_business_rules",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["LWORK", "workspace"]},
+    },
+    {
+        "query": "What parameter constraints does DGEMM enforce?",
+        "capability": "extract_business_rules",
+        "checks": {"has_citations": True, "min_answer_length": 50, "expected_keywords": ["dimension", "LDA"]},
     },
 ]
 

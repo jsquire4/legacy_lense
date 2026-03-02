@@ -250,7 +250,15 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
         "retrieval_strategy": "name_match",
     }
     mock_generate.return_value = {
-        "answer": "DGESV solves a linear system of equations using LU factorization with partial pivoting. It calls DGETRF and DGETRS. INFO parameter checks for errors. N must be positive. Cholesky symmetric factorization.",
+        "answer": (
+            "DGESV solves a linear system of equations using LU factorization with partial pivoting. "
+            "It calls DGETRF and DGETRS. The routine performs matrix multiplication via DGEMM and "
+            "triangular solve with DTRSM. DGEQRF handles QR. The norm of the matrix is computed. "
+            "Singular value decomposition is used. Cholesky symmetric factorization via DPOTRF. "
+            "Least square problems solved by DGELS. Error check and workspace query with LWORK. "
+            "Loop and block optimizations improve performance. Each routine validates dimension and LDA. "
+            "INFO parameter and N must be positive."
+        ),
         "citations": ["dgesv.f:1-50"],
         "model": "gpt-4o-mini",
         "token_usage": {},
@@ -269,6 +277,9 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     assert "capability" in first
     assert "checks" in first
     assert "latency_ms" in first
+    assert "answer_preview" in first
+    assert "citations" in first
+    assert isinstance(first["citations"], list)
 
     assert events[-1]["event"] == "summary"
     summary = events[-1]["data"]

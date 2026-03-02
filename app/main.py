@@ -15,6 +15,7 @@ from app.services.retrieval import retrieve
 from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
+from scripts.evaluate import EVAL_QUERIES, compute_recall_at_k
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +250,57 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
     def gen():
         yield from _stream_generator(req.query, req.top_k, capability)
 
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+def _eval_stream_generator():
+    """Generator yielding SSE events for each eval query: progress*, summary."""
+    total_recall = 0.0
+    total_latency = 0.0
+    n = len(EVAL_QUERIES)
+
+    for i, item in enumerate(EVAL_QUERIES):
+        query = item["query"]
+        expected = item["expected_files"]
+
+        t0 = time.time()
+        result = retrieve(query, top_k=5)
+        latency_ms = round((time.time() - t0) * 1000, 1)
+
+        retrieved_files = []
+        seen = set()
+        for chunk in result["chunks"]:
+            fp = chunk.get("metadata", {}).get("file_path", "")
+            if fp:
+                fname = Path(fp).name
+                if fname not in seen:
+                    retrieved_files.append(fname)
+                    seen.add(fname)
+
+        recall = compute_recall_at_k(retrieved_files, expected, k=5)
+        total_recall += recall
+        total_latency += latency_ms
+
+        yield _sse_event("progress", {
+            "index": i,
+            "query": query,
+            "recall_at_5": round(recall, 4),
+            "latency_ms": latency_ms,
+            "retrieved_files": retrieved_files[:5],
+            "expected_files": expected,
+        })
+
+    yield _sse_event("summary", {
+        "avg_recall_at_5": round(total_recall / n, 4),
+        "avg_latency_ms": round(total_latency / n, 1),
+        "total_queries": n,
+    })
+
+
+@app.get("/api/eval/stream")
+async def eval_stream_endpoint():
+    def gen():
+        yield from _eval_stream_generator()
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 

@@ -9,26 +9,53 @@
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             background: #0d1117; color: #c9d1d9;
-            min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-            padding: 2rem 1rem;
+            min-height: 100vh; padding: 2rem 1rem;
         }
-        h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; }
-        .subtitle { color: #8b949e; margin-bottom: 1rem; font-size: 0.95rem; }
-        .container { width: 100%; max-width: 800px; }
+        h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; text-align: center; }
+        .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center; }
+        .container { width: 100%; max-width: 1400px; margin: 0 auto; }
 
-        /* Tabs */
-        .tab-bar { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid #30363d; }
-        .tab {
-            padding: 0.6rem 1.2rem; cursor: pointer; font-size: 0.95rem; font-weight: 600;
-            color: #8b949e; border-bottom: 2px solid transparent; transition: all 0.15s;
-            background: none; border-top: none; border-left: none; border-right: none;
+        /* Two-column layout */
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            grid-template-rows: auto 1fr;
+            gap: 1.5rem;
+            align-items: start;
         }
-        .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
-        .tab:hover { color: #c9d1d9; }
-        .tab-content { display: none; }
-        .tab-content.active { display: block; }
+        .col-chat { grid-column: 1; grid-row: 1 / -1; }
+        .col-obs { grid-column: 2; grid-row: 1; }
+        .col-secondary { grid-column: 1 / -1; }
+        .secondary-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
 
-        /* Query tab */
+        @media (max-width: 900px) {
+            .layout {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+            }
+            .col-chat { grid-column: 1; grid-row: auto; }
+            .col-obs { grid-column: 1; grid-row: auto; }
+            .col-secondary { grid-column: 1; }
+            .secondary-grid { grid-template-columns: 1fr; }
+        }
+
+        /* Panels */
+        .panel {
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 6px; padding: 1.25rem; margin-bottom: 1rem;
+        }
+        .panel-title {
+            color: #58a6ff; font-size: 0.95rem; font-weight: 700;
+            margin-bottom: 0.75rem; padding-bottom: 0.5rem;
+            border-bottom: 1px solid #30363d;
+        }
+
+        /* Query area */
         .input-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
         textarea {
             flex: 1; padding: 0.75rem; border: 1px solid #30363d;
@@ -74,14 +101,7 @@
         .error { color: #f85149; }
 
         /* Observability panel */
-        .obs-toggle {
-            margin-top: 0.75rem; padding: 0.4rem 0.6rem; background: none;
-            color: #8b949e; border: 1px solid #30363d; border-radius: 4px;
-            font-size: 0.8rem; cursor: pointer;
-        }
-        .obs-toggle:hover { color: #c9d1d9; border-color: #58a6ff; background: none; }
-        .obs-panel { display: none; margin-top: 0.75rem; }
-        .obs-panel.visible { display: block; }
+        .obs-empty { color: #8b949e; font-size: 0.82rem; font-style: italic; padding: 0.5rem 0; }
         .obs-panel h4 { color: #58a6ff; font-size: 0.82rem; margin: 0.6rem 0 0.3rem; }
         .obs-panel table {
             width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 0.5rem;
@@ -112,13 +132,36 @@
             border-radius: 3px; font-size: 0.75rem; font-family: monospace;
         }
 
-        /* Architecture tab */
+        /* Eval panel */
+        .eval-controls {
+            display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+        }
+        .eval-controls button {
+            padding: 0.5rem 1rem; font-size: 0.85rem;
+        }
+        .eval-status { color: #8b949e; font-size: 0.8rem; }
+        .eval-metrics { margin-bottom: 0.75rem; }
+        .eval-rows { max-height: 350px; overflow-y: auto; }
+        .eval-row {
+            display: grid; grid-template-columns: 1fr auto auto;
+            gap: 0.4rem; padding: 0.35rem 0; border-bottom: 1px solid #21262d;
+            font-size: 0.78rem; align-items: center;
+        }
+        .eval-row .eval-q {
+            color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .eval-row .eval-score { font-family: monospace; font-weight: 600; }
+        .eval-score.pass { color: #3fb950; }
+        .eval-score.fail { color: #f85149; }
+        .eval-row .eval-ms { color: #8b949e; font-size: 0.72rem; }
+
+        /* Architecture */
         .arch-section { margin-bottom: 1.5rem; }
         .arch-section h3 { color: #58a6ff; font-size: 1rem; margin-bottom: 0.5rem; }
         .arch-section p { color: #8b949e; font-size: 0.9rem; line-height: 1.5; }
         .pipeline {
             display: flex; align-items: center; gap: 0; flex-wrap: wrap;
-            margin: 1rem 0; padding: 1rem; background: #161b22;
+            margin: 1rem 0; padding: 1rem; background: #0d1117;
             border: 1px solid #30363d; border-radius: 6px;
         }
         .pipeline-step {
@@ -130,11 +173,11 @@
         .pipeline-step .step-tech { color: #8b949e; font-size: 0.72rem; margin-top: 0.2rem; }
         .pipeline-arrow { color: #30363d; font-size: 1.2rem; padding: 0 0.3rem; }
         .stats-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 0.75rem; margin-top: 0.75rem;
         }
         .stat-card {
-            background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+            background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
             padding: 0.75rem; text-align: center;
         }
         .stat-card .stat-num { color: #58a6ff; font-size: 1.3rem; font-weight: 700; }
@@ -153,165 +196,190 @@
         <h1>LegacyLens</h1>
         <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
 
-        <div class="tab-bar">
-            <button class="tab active" data-tab="query-tab">Query</button>
-            <button class="tab" data-tab="arch-tab">Architecture</button>
-        </div>
-
-        <!-- Query Tab -->
-        <div class="tab-content active" id="query-tab">
-            <div class="capabilities">
-                <button class="cap-btn active" data-cap="">General Query</button>
-                <button class="cap-btn" data-cap="explain_code">Explain Code</button>
-                <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
-                <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
-                <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
-            </div>
-
-            <div class="input-group">
-                <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
-                <button id="submit" onclick="submitQuery()">Ask</button>
-            </div>
-
-            <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
-
-            <div class="result" id="result">
-                <pre id="answer"></pre>
-                <div class="citations" id="citations-box">
-                    <h3>Sources</h3>
-                    <div id="citations"></div>
+        <div class="layout">
+            <!-- LEFT: Chat -->
+            <div class="col-chat">
+                <div class="capabilities">
+                    <button class="cap-btn active" data-cap="">General Query</button>
+                    <button class="cap-btn" data-cap="explain_code">Explain Code</button>
+                    <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
+                    <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
+                    <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
                 </div>
-                <div class="meta" id="meta"></div>
 
-                <button class="obs-toggle" id="obs-toggle" onclick="toggleObs()">Show Observability Details</button>
-                <div class="obs-panel" id="obs-panel">
-                    <h4>Timing</h4>
-                    <div class="obs-stats" id="obs-timing"></div>
+                <div class="input-group">
+                    <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
+                    <button id="submit" onclick="submitQuery()">Ask</button>
+                </div>
 
-                    <h4>Token Usage</h4>
-                    <div class="obs-stats" id="obs-tokens"></div>
+                <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
 
-                    <div id="obs-expansion-section" style="display:none;">
-                        <h4>Query Expansion</h4>
-                        <div class="expansion-names" id="obs-expansion"></div>
+                <div class="result" id="result">
+                    <pre id="answer"></pre>
+                    <div class="citations" id="citations-box">
+                        <h3>Sources</h3>
+                        <div id="citations"></div>
                     </div>
-
-                    <h4>Retrieved Chunks</h4>
-                    <table>
-                        <thead>
-                            <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
-                        </thead>
-                        <tbody id="obs-chunks"></tbody>
-                    </table>
+                    <div class="meta" id="meta"></div>
                 </div>
             </div>
-        </div>
 
-        <!-- Architecture Tab -->
-        <div class="tab-content" id="arch-tab">
-            <div class="arch-section">
-                <h3>RAG Pipeline</h3>
-                <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
-                <div class="pipeline">
-                    <div class="pipeline-step">
-                        <div class="step-title">Query</div>
-                        <div class="step-tech">User NL input</div>
-                    </div>
-                    <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step">
-                        <div class="step-title">Embed</div>
-                        <div class="step-tech">text-embedding-3-small</div>
-                    </div>
-                    <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step">
-                        <div class="step-title">Hybrid Search</div>
-                        <div class="step-tech">Vector + Name match</div>
-                    </div>
-                    <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step">
-                        <div class="step-title">Context</div>
-                        <div class="step-tech">6K token budget</div>
-                    </div>
-                    <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step">
-                        <div class="step-title">Generate</div>
-                        <div class="step-tech">gpt-4o-mini</div>
-                    </div>
-                    <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step">
-                        <div class="step-title">Response</div>
-                        <div class="step-tech">Citations enforced</div>
+            <!-- RIGHT TOP: Observability -->
+            <div class="col-obs">
+                <div class="panel">
+                    <h2 class="panel-title">Observability</h2>
+                    <div id="obs-empty" class="obs-empty">Run a query to see details</div>
+                    <div class="obs-panel" id="obs-content" style="display:none">
+                        <h4>Timing</h4>
+                        <div class="obs-stats" id="obs-timing"></div>
+
+                        <h4>Token Usage</h4>
+                        <div class="obs-stats" id="obs-tokens"></div>
+
+                        <div id="obs-expansion-section" style="display:none;">
+                            <h4>Query Expansion</h4>
+                            <div class="expansion-names" id="obs-expansion"></div>
+                        </div>
+
+                        <h4>Retrieved Chunks</h4>
+                        <table>
+                            <thead>
+                                <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
+                            </thead>
+                            <tbody id="obs-chunks"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
 
-            <div class="arch-section">
-                <h3>Key Stats</h3>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-num">2,272</div>
-                        <div class="stat-label">Fortran files indexed</div>
+            <!-- BOTTOM: Evals + Architecture side by side -->
+            <div class="col-secondary">
+                <div class="secondary-grid">
+                    <!-- Evals -->
+                    <div class="panel">
+                        <h2 class="panel-title">Evals</h2>
+                        <div class="eval-controls">
+                            <button id="eval-btn" onclick="runEvals()">Run Evals</button>
+                            <span class="eval-status" id="eval-status"></span>
+                        </div>
+                        <div class="eval-metrics" id="eval-metrics" style="display:none">
+                            <div class="obs-stats">
+                                <div class="stat">
+                                    <span class="stat-value" id="eval-recall">—</span>
+                                    <span>Recall@5</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value" id="eval-latency">—</span>
+                                    <span>Avg Latency</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value" id="eval-progress">0 / 15</span>
+                                    <span>Queries</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="eval-rows" id="eval-rows"></div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-num">2,334</div>
-                        <div class="stat-label">Chunks stored</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-num">0.96</div>
-                        <div class="stat-label">Recall@5</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-num">&lt;3s</div>
-                        <div class="stat-label">End-to-end latency</div>
+
+                    <!-- Architecture -->
+                    <div class="panel">
+                        <h2 class="panel-title">Architecture</h2>
+                        <div class="arch-section">
+                            <h3>RAG Pipeline</h3>
+                            <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
+                            <div class="pipeline">
+                                <div class="pipeline-step">
+                                    <div class="step-title">Query</div>
+                                    <div class="step-tech">User NL input</div>
+                                </div>
+                                <span class="pipeline-arrow">&#8594;</span>
+                                <div class="pipeline-step">
+                                    <div class="step-title">Embed</div>
+                                    <div class="step-tech">text-embedding-3-small</div>
+                                </div>
+                                <span class="pipeline-arrow">&#8594;</span>
+                                <div class="pipeline-step">
+                                    <div class="step-title">Hybrid Search</div>
+                                    <div class="step-tech">Vector + Name match</div>
+                                </div>
+                                <span class="pipeline-arrow">&#8594;</span>
+                                <div class="pipeline-step">
+                                    <div class="step-title">Context</div>
+                                    <div class="step-tech">6K token budget</div>
+                                </div>
+                                <span class="pipeline-arrow">&#8594;</span>
+                                <div class="pipeline-step">
+                                    <div class="step-title">Generate</div>
+                                    <div class="step-tech">gpt-4o-mini</div>
+                                </div>
+                                <span class="pipeline-arrow">&#8594;</span>
+                                <div class="pipeline-step">
+                                    <div class="step-title">Response</div>
+                                    <div class="step-tech">Citations enforced</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="arch-section">
+                            <h3>Key Stats</h3>
+                            <div class="stats-grid">
+                                <div class="stat-card">
+                                    <div class="stat-num">2,272</div>
+                                    <div class="stat-label">Fortran files indexed</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-num">2,334</div>
+                                    <div class="stat-label">Chunks stored</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-num">0.96</div>
+                                    <div class="stat-label">Recall@5</div>
+                                </div>
+                                <div class="stat-card">
+                                    <div class="stat-num">&lt;3s</div>
+                                    <div class="stat-label">End-to-end latency</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="arch-section">
+                            <h3>Retrieval Strategy</h3>
+                            <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
+                            <ul class="component-list">
+                                <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
+                                <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
+                                <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
+                                <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
+                            </ul>
+                        </div>
+
+                        <div class="arch-section">
+                            <h3>Components</h3>
+                            <ul class="component-list">
+                                <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
+                                <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
+                                <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
+                                <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
+                                <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
+                            </ul>
+                        </div>
+
+                        <div class="arch-section">
+                            <h3>Deployment</h3>
+                            <ul class="component-list">
+                                <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
+                                <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
+                                <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            <div class="arch-section">
-                <h3>Retrieval Strategy</h3>
-                <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
-                <ul class="component-list">
-                    <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
-                    <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
-                    <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
-                    <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
-                </ul>
-            </div>
-
-            <div class="arch-section">
-                <h3>Components</h3>
-                <ul class="component-list">
-                    <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
-                    <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
-                    <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
-                    <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
-                    <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
-                </ul>
-            </div>
-
-            <div class="arch-section">
-                <h3>Deployment</h3>
-                <ul class="component-list">
-                    <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
-                    <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
-                    <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
-                </ul>
             </div>
         </div>
     </div>
 
     <script>
         let selectedCapability = "";
-
-        // Tab switching
-        document.querySelectorAll(".tab").forEach(tab => {
-            tab.addEventListener("click", () => {
-                document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-                document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-                tab.classList.add("active");
-                document.getElementById(tab.dataset.tab).classList.add("active");
-            });
-        });
 
         // Capability selection
         document.querySelectorAll(".cap-btn").forEach(btn => {
@@ -328,13 +396,6 @@
                 submitQuery();
             }
         });
-
-        function toggleObs() {
-            const panel = document.getElementById("obs-panel");
-            const btn = document.getElementById("obs-toggle");
-            const visible = panel.classList.toggle("visible");
-            btn.textContent = visible ? "Hide Observability Details" : "Show Observability Details";
-        }
 
         function badgeClass(matchType) {
             const map = { name: "badge-name", expansion: "badge-expansion", call_graph: "badge-call-graph", vector: "badge-vector" };
@@ -388,7 +449,6 @@
         }
 
         function parseSSE(text) {
-            // Parse SSE text into array of {event, data} objects
             const events = [];
             const blocks = text.split("\n\n");
             for (const block of blocks) {
@@ -404,6 +464,17 @@
                 }
             }
             return events;
+        }
+
+        function processSSEBuffer(buffer, handler) {
+            const parts = buffer.split("\n\n");
+            const remainder = parts.pop();
+            for (const part of parts) {
+                if (!part.trim()) continue;
+                const events = parseSSE(part + "\n\n");
+                for (const evt of events) handler(evt);
+            }
+            return remainder;
         }
 
         async function submitQuery() {
@@ -424,8 +495,6 @@
             citationsDiv.innerHTML = "";
             citationsBox.style.display = "none";
             document.getElementById("meta").textContent = "";
-            document.getElementById("obs-panel").classList.remove("visible");
-            document.getElementById("obs-toggle").textContent = "Show Observability Details";
 
             try {
                 const url = selectedCapability
@@ -454,43 +523,36 @@
                     if (done) break;
 
                     buffer += decoder.decode(value, { stream: true });
-
-                    // Process complete SSE blocks (separated by \n\n)
-                    const parts = buffer.split("\n\n");
-                    buffer = parts.pop(); // keep incomplete block in buffer
-
-                    for (const part of parts) {
-                        if (!part.trim()) continue;
-                        const events = parseSSE(part + "\n\n");
-                        for (const { event, data } of events) {
-                            if (event === "retrieval") {
-                                spinner.classList.remove("visible");
-                                renderObservability({
-                                    retrieval_details: data.retrieval_details,
-                                    timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null },
-                                    token_usage: {},
-                                });
-                            } else if (event === "token") {
-                                answerEl.textContent += data.token;
-                            } else if (event === "done") {
-                                if (data.citations && data.citations.length > 0) {
-                                    citationsBox.style.display = "block";
-                                    data.citations.forEach(c => {
-                                        const span = document.createElement("span");
-                                        span.textContent = c;
-                                        citationsDiv.appendChild(span);
-                                    });
-                                }
-                                document.getElementById("meta").textContent =
-                                    `Latency: ${data.timing.total_ms}ms`;
-                                renderObservability({
-                                    retrieval_details: null,
-                                    timing: data.timing,
-                                    token_usage: data.token_usage,
+                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
+                        if (event === "retrieval") {
+                            spinner.classList.remove("visible");
+                            document.getElementById("obs-empty").style.display = "none";
+                            document.getElementById("obs-content").style.display = "block";
+                            renderObservability({
+                                retrieval_details: data.retrieval_details,
+                                timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null },
+                                token_usage: {},
+                            });
+                        } else if (event === "token") {
+                            answerEl.textContent += data.token;
+                        } else if (event === "done") {
+                            if (data.citations && data.citations.length > 0) {
+                                citationsBox.style.display = "block";
+                                data.citations.forEach(c => {
+                                    const span = document.createElement("span");
+                                    span.textContent = c;
+                                    citationsDiv.appendChild(span);
                                 });
                             }
+                            document.getElementById("meta").textContent =
+                                `Latency: ${data.timing.total_ms}ms`;
+                            renderObservability({
+                                retrieval_details: null,
+                                timing: data.timing,
+                                token_usage: data.token_usage,
+                            });
                         }
-                    }
+                    });
                 }
             } catch (err) {
                 const errorSpan = document.createElement("span");
@@ -502,6 +564,73 @@
             } finally {
                 submitBtn.disabled = false;
                 spinner.classList.remove("visible");
+            }
+        }
+
+        async function runEvals() {
+            const btn = document.getElementById("eval-btn");
+            const statusEl = document.getElementById("eval-status");
+            const metricsDiv = document.getElementById("eval-metrics");
+            const rowsDiv = document.getElementById("eval-rows");
+            const recallEl = document.getElementById("eval-recall");
+            const latencyEl = document.getElementById("eval-latency");
+            const progressEl = document.getElementById("eval-progress");
+
+            btn.disabled = true;
+            statusEl.textContent = "Running...";
+            metricsDiv.style.display = "block";
+            rowsDiv.innerHTML = "";
+            recallEl.textContent = "—";
+            latencyEl.textContent = "—";
+            progressEl.textContent = "0 / 15";
+
+            let runningRecall = 0;
+            let runningLatency = 0;
+            let completed = 0;
+
+            try {
+                const res = await fetch("/api/eval/stream");
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
+                        if (event === "progress") {
+                            completed++;
+                            runningRecall += data.recall_at_5;
+                            runningLatency += data.latency_ms;
+
+                            recallEl.textContent = (runningRecall / completed).toFixed(3);
+                            latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
+                            progressEl.textContent = `${completed} / 15`;
+
+                            const row = document.createElement("div");
+                            row.className = "eval-row";
+                            const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
+                            row.innerHTML = `
+                                <span class="eval-q" title="${data.query}">${data.query}</span>
+                                <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
+                                <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
+                            `;
+                            rowsDiv.appendChild(row);
+                        } else if (event === "summary") {
+                            recallEl.textContent = data.avg_recall_at_5.toFixed(3);
+                            latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
+                            statusEl.textContent = "Done";
+                        }
+                    });
+                }
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+            } finally {
+                btn.disabled = false;
             }
         }
     </script>

@@ -139,3 +139,67 @@ def test_capability_stream_endpoint(mock_retrieve, mock_stream):
 
     events = _parse_sse_events(response.text)
     assert events[-1]["event"] == "done"
+
+
+@patch("app.main.retrieve")
+def test_eval_stream_returns_sse(mock_retrieve):
+    mock_retrieve.return_value = {
+        "chunks": [
+            {"id": "x1", "text": "t", "score": 0.9,
+             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
+        ],
+        "expanded_names": [],
+        "retrieval_strategy": "name_match",
+    }
+
+    response = client.get("/api/eval/stream")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+
+@patch("app.main.retrieve")
+def test_eval_stream_emits_progress_events(mock_retrieve):
+    mock_retrieve.return_value = {
+        "chunks": [
+            {"id": "x1", "text": "t", "score": 0.9,
+             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
+        ],
+        "expanded_names": [],
+        "retrieval_strategy": "name_match",
+    }
+
+    response = client.get("/api/eval/stream")
+    events = _parse_sse_events(response.text)
+
+    progress_events = [e for e in events if e["event"] == "progress"]
+    assert len(progress_events) == 15
+
+    first = progress_events[0]["data"]
+    assert "query" in first
+    assert "recall_at_5" in first
+    assert "latency_ms" in first
+    assert "retrieved_files" in first
+    assert "expected_files" in first
+    assert first["index"] == 0
+
+
+@patch("app.main.retrieve")
+def test_eval_stream_summary_is_last_event(mock_retrieve):
+    mock_retrieve.return_value = {
+        "chunks": [
+            {"id": "x1", "text": "t", "score": 0.9,
+             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
+        ],
+        "expanded_names": [],
+        "retrieval_strategy": "name_match",
+    }
+
+    response = client.get("/api/eval/stream")
+    events = _parse_sse_events(response.text)
+
+    assert events[-1]["event"] == "summary"
+    summary = events[-1]["data"]
+    assert "avg_recall_at_5" in summary
+    assert "avg_latency_ms" in summary
+    assert summary["total_queries"] == 15
+    assert 0.0 <= summary["avg_recall_at_5"] <= 1.0

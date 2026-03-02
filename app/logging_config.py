@@ -1,12 +1,16 @@
-"""JSON structured logging configuration."""
+"""Structured JSON logging with rotating file handler."""
 
 import json
 import logging
+import logging.handlers
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 class JSONFormatter(logging.Formatter):
+    """Format log records as single-line JSON."""
+
     def format(self, record):
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -16,25 +20,34 @@ class JSONFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[0] is not None:
             log_entry["exception"] = self.formatException(record.exc_info)
-        # Include extra fields if present
         for key in ("query", "chunk_ids", "scores", "latency_ms", "token_usage"):
             if hasattr(record, key):
                 log_entry[key] = getattr(record, key)
         return json.dumps(log_entry)
 
 
-def setup_logging(level: str = "INFO", json_output: bool = False):
-    """Configure application logging."""
+def setup_logging(level: str = "INFO"):
+    """Configure root logger with console + rotating JSON file handler."""
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
-
-    handler = logging.StreamHandler(sys.stdout)
-    if json_output:
-        handler.setFormatter(JSONFormatter())
-    else:
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s %(levelname)s %(name)s: %(message)s"
-        ))
-
     root.handlers.clear()
-    root.addHandler(handler)
+
+    # Console — human-readable
+    console = logging.StreamHandler(sys.stdout)
+    console.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+    ))
+    root.addHandler(console)
+
+    # File — structured JSON, rotating 5 MB x 3 backups
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_dir / "legacylens.jsonl",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+    )
+    file_handler.setFormatter(JSONFormatter())
+    root.addHandler(file_handler)

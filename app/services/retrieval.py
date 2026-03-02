@@ -58,12 +58,15 @@ def _expand_query(query: str) -> list[str]:
         return []
 
 
-def retrieve(query: str, top_k: int = 8) -> list[dict]:
-    """Embed a query and search — with name-boosted hybrid retrieval."""
+def retrieve(query: str, top_k: int = 8) -> dict:
+    """Embed a query and search — with name-boosted hybrid retrieval.
+
+    Returns a dict with keys: chunks, expanded_names, retrieval_strategy.
+    """
     embeddings = embed_texts([query])
     if not embeddings:
         logger.error("Failed to embed query")
-        return []
+        return {"chunks": [], "expanded_names": [], "retrieval_strategy": "failed"}
 
     query_embedding = embeddings[0]
     routine_name = _extract_routine_name(query)
@@ -71,20 +74,27 @@ def retrieve(query: str, top_k: int = 8) -> list[dict]:
     # Collect name-matched results from explicit name or LLM expansion
     name_results = []
     seen_ids = set()
+    expanded_names: list[str] = []
+    strategy = "vector"
 
     if routine_name:
+        strategy = "name_match"
         hits = search_by_name(query_embedding, routine_name, top_k=3)
         for h in hits:
             if h["id"] not in seen_ids:
+                h["_match_type"] = "name"
                 name_results.append(h)
                 seen_ids.add(h["id"])
     else:
         # Conceptual query — expand with LLM
         expanded_names = _expand_query(query)
+        if expanded_names:
+            strategy = "query_expansion"
         for name in expanded_names[:10]:
             hits = search_by_name(query_embedding, name, top_k=1)
             for h in hits:
                 if h["id"] not in seen_ids:
+                    h["_match_type"] = "expansion"
                     name_results.append(h)
                     seen_ids.add(h["id"])
 
@@ -102,6 +112,7 @@ def retrieve(query: str, top_k: int = 8) -> list[dict]:
             hits = search_by_name(query_embedding, name, top_k=1)
             for h in hits:
                 if h["id"] not in seen_ids:
+                    h["_match_type"] = "call_graph"
                     call_graph_results.append(h)
                     seen_ids.add(h["id"])
 
@@ -112,6 +123,7 @@ def retrieve(query: str, top_k: int = 8) -> list[dict]:
     merged = list(name_results) + call_graph_results
     for r in vector_results:
         if r["id"] not in seen_ids and len(merged) < top_k:
+            r.setdefault("_match_type", "vector")
             merged.append(r)
             seen_ids.add(r["id"])
 
@@ -119,4 +131,8 @@ def retrieve(query: str, top_k: int = 8) -> list[dict]:
         "Retrieved %d results (%d name-matched, %d call-graph) for query: %.80s",
         len(merged), len(name_results), len(call_graph_results), query,
     )
-    return merged
+    return {
+        "chunks": merged,
+        "expanded_names": expanded_names,
+        "retrieval_strategy": strategy,
+    }

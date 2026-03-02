@@ -96,7 +96,8 @@ def main():
         expected = eval_item["expected_files"]
 
         start = time.time()
-        chunks = retrieve(query, top_k=5)
+        result = retrieve(query, top_k=5)
+        chunks = result["chunks"]
         latency = (time.time() - start) * 1000
 
         retrieved_files = []

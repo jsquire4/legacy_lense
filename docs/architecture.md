@@ -7,19 +7,20 @@ LegacyLens is a RAG (Retrieval-Augmented Generation) application that makes the 
 ## System Architecture
 
 ```
-User Query → FastAPI → Embed Query → Qdrant Search → Context Assembly → LLM Generation → Response
+User Query → FastAPI → Hybrid Retrieval → Context Assembly → LLM Generation → Citation-enforced Response
 ```
 
 ### Components
 
-1. **FastAPI Web Server** (`app/main.py`) — Serves the web UI and API endpoints
+1. **FastAPI Web Server** (`app/main.py`) — Serves the web UI and REST API with observability data
 2. **Fortran Parser** (`app/services/parser.py`) — Parses .f and .f90 files using fparser
 3. **Chunker** (`app/services/chunker.py`) — Splits parsed units into token-capped chunks
 4. **Embedding Service** (`app/services/embeddings.py`) — Generates embeddings via OpenAI
 5. **Vector Store** (`app/services/vector_store.py`) — Manages Qdrant collection operations
-6. **Retrieval Service** (`app/services/retrieval.py`) — Query → embed → search pipeline
-7. **Generation Service** (`app/services/generation.py`) — LLM answer generation with citations
-8. **Capabilities** (`app/services/capabilities.py`) — Specialized code understanding prompts
+6. **Retrieval Service** (`app/services/retrieval.py`) — Hybrid retrieval: name match + query expansion + call-graph + vector
+7. **Generation Service** (`app/services/generation.py`) — LLM answer generation with citation enforcement
+8. **Capabilities** (`app/services/capabilities.py`) — 4 specialized code understanding prompts
+9. **Logging** (`app/logging_config.py`) — Structured JSON logging with rotating file handler
 
 ## Key Design Decisions
 
@@ -40,15 +41,22 @@ User Query → FastAPI → Embed Query → Qdrant Search → Context Assembly �
 - Only ~55 out of 2300+ files require splitting (the largest routines)
 - Sliding window with overlap handles oversized files
 
+### Why hybrid retrieval?
+- Pure vector search misses exact routine matches for queries like "What does DGESV do?"
+- Name matching via payload filter gives exact hits with perfect recall for known routines
+- LLM query expansion bridges conceptual queries ("How does SVD work?") to routine names (DGESVD, DGESDD)
+- Call-graph following retrieves implementation dependencies (one hop) for better context
+- Vector similarity fills remaining slots for broad coverage
+
 ### Why no framework (LangChain, LlamaIndex)?
 - Custom pipeline maximizes understanding of RAG mechanics
 - Direct use of OpenAI SDK + Qdrant client keeps dependencies minimal
 - Full control over chunking strategy, context assembly, and citation enforcement
 
-### Why binary-search context truncation?
-- Fits maximum number of complete chunks within token budget
+### Why 6000-token context budget?
+- Fits maximum number of complete chunks within budget
 - Avoids mid-chunk truncation that loses context
-- 6000-token context budget leaves room for system prompt and response
+- Leaves room for system prompt and response within gpt-4o-mini's context window
 
 ## Data Flow
 
@@ -57,21 +65,39 @@ User Query → FastAPI → Embed Query → Qdrant Search → Context Assembly �
 Fortran Files → Parser (fparser1/fparser2) → ParsedUnits → Chunker → Chunks → Embeddings → Qdrant
 ```
 
-- 2300 files parsed into 2304 units (some .f90 files yield multiple units)
-- 2407 chunks after splitting oversized units
+- 2,272 files parsed into 2,304 units (some .f90 files yield multiple units)
+- 2,334 chunks after splitting oversized units
 - 0 parse errors (RAW fallback catches all failures)
 
 ### Query Pipeline
 ```
-User Query → Embed → Qdrant Search (top_k=8) → Context Assembly → GPT-4o-mini → Citation-enforced Answer
+User Query
+  ├─ Embed query (text-embedding-3-small)
+  ├─ Detect routine name? → Name-match search (Qdrant payload filter)
+  │   └─ Follow call-graph one hop
+  ├─ No name? → LLM query expansion → Search each expanded name
+  └─ Vector similarity search (cosine, top_k=8)
+      ↓
+  Merge & deduplicate → Context assembly (6K token budget) → gpt-4o-mini → Citation enforcement → Response
 ```
+
+## Observability
+
+Each query response includes:
+- **Retrieval details**: per-chunk rank, file name, routine name, similarity score, match type (name/expansion/call_graph/vector)
+- **Query expansion**: list of LLM-expanded routine names (when triggered)
+- **Timing**: retrieval_ms, generation_ms, total_ms
+- **Token usage**: prompt, completion, and total tokens
+
+Structured JSON logs are written to `logs/legacylens.jsonl` with rotating file handler (5 MB x 3 backups).
 
 ## Deployment
 
-- **Application**: Railway single service (Python/FastAPI)
+- **Application**: Railway single service (Dockerfile auto-detected)
 - **Vector DB**: Qdrant Cloud (external, free tier)
+- **Local dev**: `docker compose up --build` (one command)
 - **Ingestion**: Runs locally via `scripts/ingest.py`
-- **Serving**: Railway serves query API only (no ingestion on deploy)
+- **CI/CD**: Auto-deploys on push to GitHub
 
 ## Error Handling Strategy
 
@@ -83,3 +109,4 @@ User Query → Embed → Qdrant Search (top_k=8) → Context Assembly → GPT-4o
 | Qdrant failures | Batch upsert with retry |
 | Empty retrieval | Generation responds "insufficient context" |
 | Missing citations | Enforcement layer appends sources from chunk metadata |
+| Query expansion failure | Graceful fallback to vector-only search |

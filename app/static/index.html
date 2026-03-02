@@ -13,8 +13,22 @@
             padding: 2rem 1rem;
         }
         h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; }
-        .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; }
+        .subtitle { color: #8b949e; margin-bottom: 1rem; font-size: 0.95rem; }
         .container { width: 100%; max-width: 800px; }
+
+        /* Tabs */
+        .tab-bar { display: flex; gap: 0; margin-bottom: 1.5rem; border-bottom: 1px solid #30363d; }
+        .tab {
+            padding: 0.6rem 1.2rem; cursor: pointer; font-size: 0.95rem; font-weight: 600;
+            color: #8b949e; border-bottom: 2px solid transparent; transition: all 0.15s;
+            background: none; border-top: none; border-left: none; border-right: none;
+        }
+        .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+        .tab:hover { color: #c9d1d9; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* Query tab */
         .input-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
         textarea {
             flex: 1; padding: 0.75rem; border: 1px solid #30363d;
@@ -30,20 +44,17 @@
         }
         button:hover { background: #2ea043; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .capabilities {
-            display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;
-        }
+        .capabilities { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
         .cap-btn {
             padding: 0.4rem 0.8rem; background: #21262d; color: #8b949e;
-            border: 1px solid #30363d; border-radius: 20px; cursor: pointer;
-            font-size: 0.8rem;
+            border: 1px solid #30363d; border-radius: 20px; cursor: pointer; font-size: 0.8rem;
         }
         .cap-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
         .cap-btn:hover { border-color: #58a6ff; }
+
         .result {
             background: #161b22; border: 1px solid #30363d;
-            border-radius: 6px; padding: 1.25rem; margin-top: 1rem;
-            display: none;
+            border-radius: 6px; padding: 1.25rem; margin-top: 1rem; display: none;
         }
         .result.visible { display: block; }
         .result pre {
@@ -51,20 +62,90 @@
             font-family: 'Cascadia Code', 'Fira Code', monospace;
             font-size: 0.9rem; line-height: 1.5;
         }
-        .citations {
-            margin-top: 1rem; padding-top: 0.75rem;
-            border-top: 1px solid #30363d;
-        }
+        .citations { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #30363d; }
         .citations h3 { color: #58a6ff; font-size: 0.85rem; margin-bottom: 0.4rem; }
         .citations span {
             display: inline-block; background: #21262d; padding: 0.2rem 0.5rem;
-            border-radius: 4px; font-size: 0.8rem; margin: 0.15rem;
-            font-family: monospace;
+            border-radius: 4px; font-size: 0.8rem; margin: 0.15rem; font-family: monospace;
         }
         .meta { color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; }
         .spinner { display: none; color: #58a6ff; margin: 1rem 0; }
         .spinner.visible { display: block; }
         .error { color: #f85149; }
+
+        /* Observability panel */
+        .obs-toggle {
+            margin-top: 0.75rem; padding: 0.4rem 0.6rem; background: none;
+            color: #8b949e; border: 1px solid #30363d; border-radius: 4px;
+            font-size: 0.8rem; cursor: pointer;
+        }
+        .obs-toggle:hover { color: #c9d1d9; border-color: #58a6ff; background: none; }
+        .obs-panel { display: none; margin-top: 0.75rem; }
+        .obs-panel.visible { display: block; }
+        .obs-panel h4 { color: #58a6ff; font-size: 0.82rem; margin: 0.6rem 0 0.3rem; }
+        .obs-panel table {
+            width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 0.5rem;
+        }
+        .obs-panel th {
+            text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #30363d;
+            color: #8b949e; font-weight: 600;
+        }
+        .obs-panel td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #21262d; }
+        .obs-panel .badge {
+            display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
+            font-size: 0.72rem; font-weight: 600;
+        }
+        .badge-name { background: #1f6feb33; color: #58a6ff; }
+        .badge-expansion { background: #8957e533; color: #bc8cff; }
+        .badge-call-graph { background: #f0883e33; color: #f0883e; }
+        .badge-vector { background: #23863633; color: #3fb950; }
+        .obs-stats {
+            display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #8b949e;
+        }
+        .obs-stats .stat { display: flex; flex-direction: column; }
+        .obs-stats .stat-value { color: #c9d1d9; font-weight: 600; font-size: 0.9rem; }
+        .expansion-names {
+            display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem;
+        }
+        .expansion-names span {
+            background: #8957e522; color: #bc8cff; padding: 0.15rem 0.4rem;
+            border-radius: 3px; font-size: 0.75rem; font-family: monospace;
+        }
+
+        /* Architecture tab */
+        .arch-section { margin-bottom: 1.5rem; }
+        .arch-section h3 { color: #58a6ff; font-size: 1rem; margin-bottom: 0.5rem; }
+        .arch-section p { color: #8b949e; font-size: 0.9rem; line-height: 1.5; }
+        .pipeline {
+            display: flex; align-items: center; gap: 0; flex-wrap: wrap;
+            margin: 1rem 0; padding: 1rem; background: #161b22;
+            border: 1px solid #30363d; border-radius: 6px;
+        }
+        .pipeline-step {
+            padding: 0.5rem 0.8rem; background: #21262d; border: 1px solid #30363d;
+            border-radius: 6px; font-size: 0.82rem; text-align: center;
+            min-width: 90px;
+        }
+        .pipeline-step .step-title { color: #58a6ff; font-weight: 600; }
+        .pipeline-step .step-tech { color: #8b949e; font-size: 0.72rem; margin-top: 0.2rem; }
+        .pipeline-arrow { color: #30363d; font-size: 1.2rem; padding: 0 0.3rem; }
+        .stats-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 0.75rem; margin-top: 0.75rem;
+        }
+        .stat-card {
+            background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+            padding: 0.75rem; text-align: center;
+        }
+        .stat-card .stat-num { color: #58a6ff; font-size: 1.3rem; font-weight: 700; }
+        .stat-card .stat-label { color: #8b949e; font-size: 0.78rem; margin-top: 0.2rem; }
+        .component-list { list-style: none; }
+        .component-list li {
+            padding: 0.5rem 0; border-bottom: 1px solid #21262d;
+            font-size: 0.85rem; line-height: 1.4;
+        }
+        .component-list li strong { color: #c9d1d9; }
+        .component-list li span { color: #8b949e; }
     </style>
 </head>
 <body>
@@ -72,34 +153,167 @@
         <h1>LegacyLens</h1>
         <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
 
-        <div class="capabilities">
-            <button class="cap-btn active" data-cap="">General Query</button>
-            <button class="cap-btn" data-cap="explain_code">Explain Code</button>
-            <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
-            <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
-            <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
+        <div class="tab-bar">
+            <button class="tab active" data-tab="query-tab">Query</button>
+            <button class="tab" data-tab="arch-tab">Architecture</button>
         </div>
 
-        <div class="input-group">
-            <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
-            <button id="submit" onclick="submitQuery()">Ask</button>
-        </div>
-
-        <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
-
-        <div class="result" id="result">
-            <pre id="answer"></pre>
-            <div class="citations" id="citations-box">
-                <h3>Sources</h3>
-                <div id="citations"></div>
+        <!-- Query Tab -->
+        <div class="tab-content active" id="query-tab">
+            <div class="capabilities">
+                <button class="cap-btn active" data-cap="">General Query</button>
+                <button class="cap-btn" data-cap="explain_code">Explain Code</button>
+                <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
+                <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
+                <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
             </div>
-            <div class="meta" id="meta"></div>
+
+            <div class="input-group">
+                <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
+                <button id="submit" onclick="submitQuery()">Ask</button>
+            </div>
+
+            <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
+
+            <div class="result" id="result">
+                <pre id="answer"></pre>
+                <div class="citations" id="citations-box">
+                    <h3>Sources</h3>
+                    <div id="citations"></div>
+                </div>
+                <div class="meta" id="meta"></div>
+
+                <button class="obs-toggle" id="obs-toggle" onclick="toggleObs()">Show Observability Details</button>
+                <div class="obs-panel" id="obs-panel">
+                    <h4>Timing</h4>
+                    <div class="obs-stats" id="obs-timing"></div>
+
+                    <h4>Token Usage</h4>
+                    <div class="obs-stats" id="obs-tokens"></div>
+
+                    <div id="obs-expansion-section" style="display:none;">
+                        <h4>Query Expansion</h4>
+                        <div class="expansion-names" id="obs-expansion"></div>
+                    </div>
+
+                    <h4>Retrieved Chunks</h4>
+                    <table>
+                        <thead>
+                            <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
+                        </thead>
+                        <tbody id="obs-chunks"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Architecture Tab -->
+        <div class="tab-content" id="arch-tab">
+            <div class="arch-section">
+                <h3>RAG Pipeline</h3>
+                <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
+                <div class="pipeline">
+                    <div class="pipeline-step">
+                        <div class="step-title">Query</div>
+                        <div class="step-tech">User NL input</div>
+                    </div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step">
+                        <div class="step-title">Embed</div>
+                        <div class="step-tech">text-embedding-3-small</div>
+                    </div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step">
+                        <div class="step-title">Hybrid Search</div>
+                        <div class="step-tech">Vector + Name match</div>
+                    </div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step">
+                        <div class="step-title">Context</div>
+                        <div class="step-tech">6K token budget</div>
+                    </div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step">
+                        <div class="step-title">Generate</div>
+                        <div class="step-tech">gpt-4o-mini</div>
+                    </div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step">
+                        <div class="step-title">Response</div>
+                        <div class="step-tech">Citations enforced</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="arch-section">
+                <h3>Key Stats</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-num">2,272</div>
+                        <div class="stat-label">Fortran files indexed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-num">2,334</div>
+                        <div class="stat-label">Chunks stored</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-num">0.96</div>
+                        <div class="stat-label">Recall@5</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-num">&lt;3s</div>
+                        <div class="stat-label">End-to-end latency</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="arch-section">
+                <h3>Retrieval Strategy</h3>
+                <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
+                <ul class="component-list">
+                    <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
+                    <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
+                    <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
+                    <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
+                </ul>
+            </div>
+
+            <div class="arch-section">
+                <h3>Components</h3>
+                <ul class="component-list">
+                    <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
+                    <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
+                    <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
+                    <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
+                    <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
+                </ul>
+            </div>
+
+            <div class="arch-section">
+                <h3>Deployment</h3>
+                <ul class="component-list">
+                    <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
+                    <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
+                    <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
+                </ul>
+            </div>
         </div>
     </div>
 
     <script>
         let selectedCapability = "";
 
+        // Tab switching
+        document.querySelectorAll(".tab").forEach(tab => {
+            tab.addEventListener("click", () => {
+                document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+                document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+                tab.classList.add("active");
+                document.getElementById(tab.dataset.tab).classList.add("active");
+            });
+        });
+
+        // Capability selection
         document.querySelectorAll(".cap-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 document.querySelectorAll(".cap-btn").forEach(b => b.classList.remove("active"));
@@ -115,6 +329,64 @@
             }
         });
 
+        function toggleObs() {
+            const panel = document.getElementById("obs-panel");
+            const btn = document.getElementById("obs-toggle");
+            const visible = panel.classList.toggle("visible");
+            btn.textContent = visible ? "Hide Observability Details" : "Show Observability Details";
+        }
+
+        function badgeClass(matchType) {
+            const map = { name: "badge-name", expansion: "badge-expansion", call_graph: "badge-call-graph", vector: "badge-vector" };
+            return map[matchType] || "badge-vector";
+        }
+
+        function renderObservability(data) {
+            // Timing
+            const timing = data.timing || {};
+            document.getElementById("obs-timing").innerHTML = [
+                ["Retrieval", timing.retrieval_ms],
+                ["Generation", timing.generation_ms],
+                ["Total", timing.total_ms],
+            ].map(([label, val]) =>
+                `<div class="stat"><span class="stat-value">${val != null ? val.toFixed(0) + 'ms' : '—'}</span><span>${label}</span></div>`
+            ).join("");
+
+            // Tokens
+            const tok = data.token_usage || {};
+            document.getElementById("obs-tokens").innerHTML = [
+                ["Prompt", tok.prompt_tokens],
+                ["Completion", tok.completion_tokens],
+                ["Total", tok.total_tokens],
+            ].map(([label, val]) =>
+                `<div class="stat"><span class="stat-value">${val != null ? val.toLocaleString() : '—'}</span><span>${label}</span></div>`
+            ).join("");
+
+            // Expansion
+            const rd = data.retrieval_details || {};
+            const expSection = document.getElementById("obs-expansion-section");
+            const expDiv = document.getElementById("obs-expansion");
+            if (rd.expanded_names && rd.expanded_names.length > 0) {
+                expSection.style.display = "block";
+                expDiv.innerHTML = rd.expanded_names.map(n => `<span>${n}</span>`).join("");
+            } else {
+                expSection.style.display = "none";
+            }
+
+            // Chunks table
+            const tbody = document.getElementById("obs-chunks");
+            const chunks = (rd.chunks || []);
+            tbody.innerHTML = chunks.map(c =>
+                `<tr>
+                    <td>${c.rank}</td>
+                    <td style="font-family:monospace;font-size:0.78rem">${c.file_name}</td>
+                    <td style="font-family:monospace;font-size:0.78rem">${c.routine_name}</td>
+                    <td>${c.score.toFixed(4)}</td>
+                    <td><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></td>
+                </tr>`
+            ).join("");
+        }
+
         async function submitQuery() {
             const query = document.getElementById("query").value.trim();
             if (!query) return;
@@ -126,6 +398,8 @@
             submitBtn.disabled = true;
             spinner.classList.add("visible");
             resultDiv.classList.remove("visible");
+            document.getElementById("obs-panel").classList.remove("visible");
+            document.getElementById("obs-toggle").textContent = "Show Observability Details";
 
             try {
                 const url = selectedCapability
@@ -165,6 +439,7 @@
                 document.getElementById("meta").textContent =
                     `Latency: ${data.latency_ms}ms`;
 
+                renderObservability(data);
                 resultDiv.classList.add("visible");
             } catch (err) {
                 const errorSpan = document.createElement("span");

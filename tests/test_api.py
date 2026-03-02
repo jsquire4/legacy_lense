@@ -24,9 +24,13 @@ def test_root_serves_html():
 @patch("app.main.generate_answer")
 @patch("app.main.retrieve")
 def test_query_endpoint(mock_retrieve, mock_generate):
-    mock_retrieve.return_value = [
-        {"text": "test", "score": 0.9, "metadata": {"file_path": "test.f"}}
-    ]
+    mock_retrieve.return_value = {
+        "chunks": [
+            {"id": "abc123", "text": "test", "score": 0.9, "metadata": {"file_path": "test.f"}, "_match_type": "vector"}
+        ],
+        "expanded_names": [],
+        "retrieval_strategy": "vector",
+    }
     mock_generate.return_value = {
         "answer": "Test answer",
         "citations": ["test.f:1-10"],
@@ -45,7 +49,11 @@ def test_query_endpoint(mock_retrieve, mock_generate):
 @patch("app.main.generate_answer")
 @patch("app.main.retrieve")
 def test_capability_endpoint(mock_retrieve, mock_generate):
-    mock_retrieve.return_value = [{"text": "test", "score": 0.9, "metadata": {}}]
+    mock_retrieve.return_value = {
+        "chunks": [{"id": "abc123", "text": "test", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
+        "expanded_names": [],
+        "retrieval_strategy": "vector",
+    }
     mock_generate.return_value = {
         "answer": "Explained",
         "citations": [],

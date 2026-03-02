@@ -7,12 +7,12 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.services.retrieval import retrieve
-from app.services.generation import generate_answer
+from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
 
@@ -171,6 +171,85 @@ async def capability_endpoint(capability: str, req: CapabilityRequest):
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _build_response, req.query, req.top_k, capability)
+
+
+def _sse_event(event: str, data: dict) -> str:
+    """Format a single SSE event."""
+    import json
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _stream_generator(query: str, top_k: int, capability: str | None = None):
+    """Generator that yields SSE events: retrieval, token*, done."""
+    import json
+    t0 = time.time()
+
+    retrieval_result = retrieve(query, top_k)
+    chunks = retrieval_result["chunks"]
+    t_retrieval = time.time()
+    retrieval_ms = round((t_retrieval - t0) * 1000, 1)
+
+    # Build chunk details
+    chunk_details = []
+    for i, chunk in enumerate(chunks):
+        meta = chunk.get("metadata", {})
+        file_path = meta.get("file_path", "")
+        chunk_details.append({
+            "rank": i + 1,
+            "chunk_id": str(chunk.get("id", "")),
+            "file_name": Path(file_path).name if file_path else "",
+            "routine_name": meta.get("unit_name", ""),
+            "score": round(chunk.get("score", 0.0), 4),
+            "match_type": chunk.get("_match_type", "vector"),
+        })
+
+    yield _sse_event("retrieval", {
+        "retrieval_details": {
+            "strategy": retrieval_result["retrieval_strategy"],
+            "expanded_names": retrieval_result["expanded_names"],
+            "chunks": chunk_details,
+        },
+        "timing": {"retrieval_ms": retrieval_ms},
+    })
+
+    # Stream generation tokens
+    for event in generate_answer_stream(query, chunks, capability):
+        if event["type"] == "token":
+            yield _sse_event("token", {"token": event["token"]})
+        elif event["type"] == "done":
+            t_done = time.time()
+            generation_ms = round((t_done - t_retrieval) * 1000, 1)
+            total_ms = round((t_done - t0) * 1000, 1)
+            yield _sse_event("done", {
+                "citations": event["citations"],
+                "token_usage": event["token_usage"],
+                "timing": {
+                    "retrieval_ms": retrieval_ms,
+                    "generation_ms": generation_ms,
+                    "total_ms": total_ms,
+                },
+            })
+
+
+@app.post("/api/query/stream")
+async def query_stream_endpoint(req: QueryRequest):
+    loop = asyncio.get_event_loop()
+
+    def gen():
+        yield from _stream_generator(req.query, req.top_k, None)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.post("/api/capabilities/{capability}/stream")
+async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
+    if capability not in CAPABILITIES:
+        raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
+
+    def gen():
+        yield from _stream_generator(req.query, req.top_k, capability)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.get("/")

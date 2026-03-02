@@ -136,3 +136,81 @@ Question: {query}"""
         "model": settings.CHAT_MODEL,
         "token_usage": token_usage,
     }
+
+
+def generate_answer_stream(
+    query: str,
+    chunks: list[dict],
+    capability: str | None = None,
+):
+    """Stream answer tokens, yielding dicts for each event.
+
+    Yields:
+        {"type": "token", "token": str}           — per content delta
+        {"type": "done", "citations": list, "token_usage": dict} — final
+    """
+    settings = get_settings()
+    client = get_openai_client()
+
+    if not chunks:
+        yield {
+            "type": "token",
+            "token": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
+        }
+        yield {"type": "done", "citations": [], "token_usage": {}}
+        return
+
+    context = _assemble_context(chunks)
+
+    if capability and capability in CAPABILITIES:
+        system_prompt = CAPABILITIES[capability]
+    else:
+        system_prompt = DEFAULT_SYSTEM_PROMPT
+
+    user_message = f"""Context from the LAPACK Fortran codebase:
+
+{context}
+
+---
+
+Question: {query}"""
+
+    stream = client.chat.completions.create(
+        model=settings.CHAT_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+        temperature=0.1,
+        max_tokens=2000,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+
+    accumulated = []
+    token_usage = {}
+
+    for chunk in stream:
+        if chunk.usage is not None:
+            token_usage = {
+                "prompt_tokens": chunk.usage.prompt_tokens,
+                "completion_tokens": chunk.usage.completion_tokens,
+                "total_tokens": chunk.usage.total_tokens,
+            }
+
+        if chunk.choices:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                accumulated.append(delta.content)
+                yield {"type": "token", "token": delta.content}
+
+    full_text = "".join(accumulated)
+    citations = _extract_citations_from_text(full_text)
+
+    if not citations:
+        citations = _build_citation_fallback(chunks[:5])
+        if citations:
+            suffix = "\n\nSources: " + ", ".join(citations)
+            yield {"type": "token", "token": suffix}
+
+    yield {"type": "done", "citations": citations, "token_usage": token_usage}

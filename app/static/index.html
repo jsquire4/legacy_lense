@@ -387,6 +387,25 @@
             ).join("");
         }
 
+        function parseSSE(text) {
+            // Parse SSE text into array of {event, data} objects
+            const events = [];
+            const blocks = text.split("\n\n");
+            for (const block of blocks) {
+                if (!block.trim()) continue;
+                let event = "", data = "";
+                for (const line of block.split("\n")) {
+                    if (line.startsWith("event: ")) event = line.slice(7);
+                    else if (line.startsWith("data: ")) data = line.slice(6);
+                }
+                if (event && data) {
+                    try { events.push({ event, data: JSON.parse(data) }); }
+                    catch {}
+                }
+            }
+            return events;
+        }
+
         async function submitQuery() {
             const query = document.getElementById("query").value.trim();
             if (!query) return;
@@ -394,17 +413,24 @@
             const submitBtn = document.getElementById("submit");
             const spinner = document.getElementById("spinner");
             const resultDiv = document.getElementById("result");
+            const answerEl = document.getElementById("answer");
+            const citationsDiv = document.getElementById("citations");
+            const citationsBox = document.getElementById("citations-box");
 
             submitBtn.disabled = true;
             spinner.classList.add("visible");
             resultDiv.classList.remove("visible");
+            answerEl.textContent = "";
+            citationsDiv.innerHTML = "";
+            citationsBox.style.display = "none";
+            document.getElementById("meta").textContent = "";
             document.getElementById("obs-panel").classList.remove("visible");
             document.getElementById("obs-toggle").textContent = "Show Observability Details";
 
             try {
                 const url = selectedCapability
-                    ? `/api/capabilities/${selectedCapability}`
-                    : "/api/query";
+                    ? `/api/capabilities/${selectedCapability}/stream`
+                    : "/api/query/stream";
 
                 const res = await fetch(url, {
                     method: "POST",
@@ -417,35 +443,59 @@
                     throw new Error(err.detail || `HTTP ${res.status}`);
                 }
 
-                const data = await res.json();
-
-                document.getElementById("answer").textContent = data.answer;
-
-                const citationsDiv = document.getElementById("citations");
-                const citationsBox = document.getElementById("citations-box");
-                citationsDiv.innerHTML = "";
-
-                if (data.citations && data.citations.length > 0) {
-                    citationsBox.style.display = "block";
-                    data.citations.forEach(c => {
-                        const span = document.createElement("span");
-                        span.textContent = c;
-                        citationsDiv.appendChild(span);
-                    });
-                } else {
-                    citationsBox.style.display = "none";
-                }
-
-                document.getElementById("meta").textContent =
-                    `Latency: ${data.latency_ms}ms`;
-
-                renderObservability(data);
                 resultDiv.classList.add("visible");
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Process complete SSE blocks (separated by \n\n)
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop(); // keep incomplete block in buffer
+
+                    for (const part of parts) {
+                        if (!part.trim()) continue;
+                        const events = parseSSE(part + "\n\n");
+                        for (const { event, data } of events) {
+                            if (event === "retrieval") {
+                                spinner.classList.remove("visible");
+                                renderObservability({
+                                    retrieval_details: data.retrieval_details,
+                                    timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null },
+                                    token_usage: {},
+                                });
+                            } else if (event === "token") {
+                                answerEl.textContent += data.token;
+                            } else if (event === "done") {
+                                if (data.citations && data.citations.length > 0) {
+                                    citationsBox.style.display = "block";
+                                    data.citations.forEach(c => {
+                                        const span = document.createElement("span");
+                                        span.textContent = c;
+                                        citationsDiv.appendChild(span);
+                                    });
+                                }
+                                document.getElementById("meta").textContent =
+                                    `Latency: ${data.timing.total_ms}ms`;
+                                renderObservability({
+                                    retrieval_details: null,
+                                    timing: data.timing,
+                                    token_usage: data.token_usage,
+                                });
+                            }
+                        }
+                    }
+                }
             } catch (err) {
                 const errorSpan = document.createElement("span");
                 errorSpan.className = "error";
                 errorSpan.textContent = `Error: ${err.message}`;
-                const answerEl = document.getElementById("answer");
                 answerEl.textContent = "";
                 answerEl.appendChild(errorSpan);
                 resultDiv.classList.add("visible");

@@ -3,7 +3,7 @@
 from unittest.mock import patch, MagicMock
 import pytest
 
-from app.services.vector_store import ensure_collection, upsert_chunks, search
+from app.services.vector_store import ensure_collection, upsert_chunks, search, search_by_name
 from app.services.chunker import Chunk
 
 
@@ -79,3 +79,121 @@ def test_search_uses_query_points(mock_settings, mock_client_fn):
     assert len(results) == 1
     assert results[0]["score"] == 0.95
     mock_client.query_points.assert_called_once()
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_search_by_name_uses_filter(mock_settings, mock_client_fn):
+    """search_by_name calls query_points with unit_name filter."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    mock_settings.return_value = settings
+
+    mock_point = MagicMock()
+    mock_point.id = "dgesv-1"
+    mock_point.score = 0.98
+    mock_point.payload = {"text": "DGESV code", "unit_name": "DGESV", "file_path": "dgesv.f"}
+
+    mock_client = MagicMock()
+    mock_client.query_points.return_value.points = [mock_point]
+    mock_client_fn.return_value = mock_client
+
+    results = search_by_name([0.1] * 1536, "DGESV", top_k=3)
+    assert len(results) == 1
+    assert results[0]["metadata"]["unit_name"] == "DGESV"
+    call_kwargs = mock_client.query_points.call_args.kwargs
+    assert "query_filter" in call_kwargs
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_ensure_collection_creates_payload_indexes(mock_settings, mock_client_fn):
+    """ensure_collection creates payload indexes when creating new collection."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    settings.EMBEDDING_DIM = 1536
+    mock_settings.return_value = settings
+
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value.collections = []
+    mock_client_fn.return_value = mock_client
+
+    ensure_collection()
+    assert mock_client.create_payload_index.call_count >= 1
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_ensure_collection_toctou_race(mock_settings, mock_client_fn):
+    """ensure_collection handles 'already exists' race gracefully."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "toctou_test"
+    settings.EMBEDDING_DIM = 1536
+    mock_settings.return_value = settings
+
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value.collections = []
+    mock_client.create_collection.side_effect = Exception("Collection already exists")
+    mock_client_fn.return_value = mock_client
+
+    ensure_collection()
+    mock_client.create_collection.assert_called_once()
+
+
+@patch("app.services.vector_store.get_settings")
+def test_get_qdrant_client_returns_client(mock_settings):
+    """get_qdrant_client returns QdrantClient (covers lines 28-29)."""
+    settings = MagicMock()
+    settings.QDRANT_URL = "http://localhost:6333"
+    settings.QDRANT_API_KEY = "test-key"
+    mock_settings.return_value = settings
+
+    from app.services.vector_store import get_qdrant_client
+
+    get_qdrant_client.cache_clear()
+    try:
+        client = get_qdrant_client()
+        from qdrant_client import QdrantClient
+
+        assert isinstance(client, QdrantClient)
+    finally:
+        get_qdrant_client.cache_clear()
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_ensure_collection_raises_on_other_error(mock_settings, mock_client_fn):
+    """ensure_collection re-raises when create_collection fails with non-already-exists (line 72)."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "raise_test"
+    settings.EMBEDDING_DIM = 1536
+    mock_settings.return_value = settings
+
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value.collections = []
+    mock_client.create_collection.side_effect = Exception("Connection refused")
+    mock_client_fn.return_value = mock_client
+
+    with pytest.raises(Exception, match="Connection refused"):
+        ensure_collection()
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_upsert_chunks_multi_batch(mock_settings, mock_client_fn):
+    """upsert_chunks uploads in batches of 100."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    mock_settings.return_value = settings
+
+    mock_client = MagicMock()
+    mock_client_fn.return_value = mock_client
+
+    chunks = [
+        Chunk(text=f"chunk {i}", metadata={"file_path": "test.f", "unit_name": f"R{i}"})
+        for i in range(150)
+    ]
+    embeddings = [[0.1] * 1536] * 150
+
+    upsert_chunks(chunks, embeddings)
+    assert mock_client.upsert.call_count == 2

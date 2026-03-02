@@ -76,6 +76,37 @@ def test_unknown_capability():
     assert response.status_code == 404
 
 
+def test_unknown_capability_stream():
+    """Capability stream endpoint returns 404 for unknown capability."""
+    response = client.post(
+        "/api/capabilities/nonexistent/stream",
+        json={"query": "test"},
+    )
+    assert response.status_code == 404
+
+
+def test_query_request_validation_empty_query():
+    """QueryRequest rejects empty query."""
+    response = client.post("/api/query", json={"query": ""})
+    assert response.status_code == 422
+
+
+def test_query_request_validation_top_k_bounds():
+    """QueryRequest enforces top_k between 1 and 20."""
+    response_lo = client.post("/api/query", json={"query": "test", "top_k": 0})
+    assert response_lo.status_code == 422
+    response_hi = client.post("/api/query", json={"query": "test", "top_k": 21})
+    assert response_hi.status_code == 422
+
+
+@patch("app.main.setup_logging")
+def test_lifespan_calls_setup_logging(mock_setup_logging):
+    """Lifespan context calls setup_logging on startup."""
+    with TestClient(app) as c:
+        c.get("/health")
+    mock_setup_logging.assert_called()
+
+
 def _parse_sse_events(text: str) -> list[dict]:
     """Parse SSE text into list of {event, data} dicts."""
     import json

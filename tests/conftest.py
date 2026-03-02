@@ -44,6 +44,43 @@ end subroutine ctest
 
 SAMPLE_LARGE_FORTRAN = "*> Large test file\n" + "      X = X + 1\n" * 5000
 
+SAMPLE_BLOCK_DATA = """\
+      BLOCK DATA INIT
+      INTEGER N
+      COMMON /COEFF/ N
+      DATA N /10/
+      END
+"""
+
+SAMPLE_PROGRAM = """\
+      PROGRAM MAIN
+      PRINT *, 'Hello'
+      END
+"""
+
+SAMPLE_FIXED_FORM_MODULE = """\
+      MODULE FOO
+      CONTAINS
+      SUBROUTINE BAR
+      END SUBROUTINE
+      END MODULE
+"""
+
+
+@pytest.fixture
+def sample_block_data():
+    return SAMPLE_BLOCK_DATA
+
+
+@pytest.fixture
+def sample_program():
+    return SAMPLE_PROGRAM
+
+
+@pytest.fixture
+def sample_fixed_form_module():
+    return SAMPLE_FIXED_FORM_MODULE
+
 
 @pytest.fixture
 def sample_f_code():

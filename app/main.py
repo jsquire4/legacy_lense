@@ -15,7 +15,7 @@ from app.services.retrieval import retrieve
 from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
-from scripts.evaluate import EVAL_QUERIES, compute_recall_at_k
+from app.eval_data import EVAL_QUERIES, compute_recall_at_k
 
 logger = logging.getLogger(__name__)
 

@@ -68,3 +68,130 @@ def test_multiple_units():
     assert len(chunks) == 3
     names = [c.metadata["unit_name"] for c in chunks]
     assert names == ["UNIT0", "UNIT1", "UNIT2"]
+
+
+def test_extract_purpose_via_chunk_units():
+    """Doc comments with routine name produce PURPOSE line in header."""
+    doc = "DTEST computes the LU factorization of a matrix."
+    unit = _make_unit(doc_comments=doc, name="DTEST")
+    chunks = chunk_units([unit])
+    assert "PURPOSE:" in chunks[0].text
+    assert "LU factorization" in chunks[0].text
+
+
+def test_extract_purpose_stops_at_parameter():
+    """Doc with Parameter line is included; purpose extraction stops before it."""
+    doc = "Purpose: Main routine.\nParameter N - input size"
+    unit = _make_unit(doc_comments=doc)
+    chunks = chunk_units([unit])
+    assert "Main routine" in chunks[0].text
+
+
+def test_sliding_window_small_max_tokens():
+    """Oversized unit with small max_tokens uses sliding window split."""
+    big_source = "      X = X + 1\n" * 200
+    unit = _make_unit(source_text=big_source)
+    chunks = chunk_units([unit], max_tokens=150)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert _count_tokens(c.text) <= 150
+
+
+def test_header_truncation_when_doc_too_large():
+    """When doc_comments make header huge, truncate to header-only then split."""
+    huge_doc = "Doc line.\n" * 500
+    big_source = "      X = X + 1\n" * 500
+    unit = _make_unit(source_text=big_source, doc_comments=huge_doc)
+    chunks = chunk_units([unit], max_tokens=200)
+    assert len(chunks) >= 1
+    for c in chunks:
+        assert _count_tokens(c.text) <= 200
+
+
+def test_extract_purpose_blank_line_breaks():
+    """Empty line after purpose content causes break."""
+    doc = "Purpose: Main text.\n\nMore after blank"
+    unit = _make_unit(doc_comments=doc)
+    chunks = chunk_units([unit])
+    assert "Main text" in chunks[0].text
+
+
+def test_extract_purpose_skips_routine_name_only_line():
+    """Line that is just the routine name is skipped."""
+    doc = "DTEST\nDTEST does something useful."
+    unit = _make_unit(doc_comments=doc, name="DTEST")
+    chunks = chunk_units([unit])
+    assert "something useful" in chunks[0].text
+
+
+def test_extract_purpose_author_stops():
+    """Author: line stops purpose extraction."""
+    doc = "Purpose: Main.\nAuthor: Jane"
+    unit = _make_unit(doc_comments=doc)
+    chunks = chunk_units([unit])
+    assert "Main" in chunks[0].text
+
+
+def test_extract_purpose_blank_lines_continue():
+    """Blank lines at start trigger continue (line 40)."""
+    doc = "\n\nDTEST computes eigenvalues."
+    unit = _make_unit(doc_comments=doc, name="DTEST")
+    chunks = chunk_units([unit])
+    assert "eigenvalues" in chunks[0].text
+
+
+def test_extract_purpose_parameter_line_continue():
+    """Parameter line when no purpose yet triggers continue (line 45)."""
+    doc = "Parameter N - size\nDTEST does the work."
+    unit = _make_unit(doc_comments=doc, name="DTEST")
+    chunks = chunk_units([unit])
+    assert "work" in chunks[0].text
+
+
+def test_extract_purpose_blank_after_content_breaks():
+    """Blank line after purpose content triggers break (line 40)."""
+    doc = "Purpose: Main.\nSome text here\n\nMore after blank"
+    unit = _make_unit(doc_comments=doc)
+    chunks = chunk_units([unit])
+    assert "PURPOSE:" in chunks[0].text
+    assert "Some text here" in chunks[0].text
+
+
+def test_extract_purpose_parameter_after_content_breaks():
+    """Parameter line after purpose content triggers break (line 45)."""
+    doc = "Purpose: Main.\nSome text\nParameter N - input"
+    unit = _make_unit(doc_comments=doc)
+    chunks = chunk_units([unit])
+    assert "PURPOSE:" in chunks[0].text
+    assert "Some text" in chunks[0].text
+
+
+def test_sliding_window_empty_source():
+    """_sliding_window_split with empty text returns single empty chunk."""
+    from app.services.chunker import _sliding_window_split
+
+    result = _sliding_window_split("", max_tokens=50)
+    assert result == [""]
+
+
+def test_sliding_window_min_tokens_clamp():
+    """_sliding_window_split clamps max_tokens to MIN_WINDOW_TOKENS when smaller."""
+    from app.services.chunker import _sliding_window_split
+
+    big = "word " * 500
+    result = _sliding_window_split(big, max_tokens=50)
+    assert len(result) >= 1
+    for r in result:
+        assert len(r) > 0
+
+
+def test_safety_truncation_when_chunk_exceeds_limit():
+    """Chunk text exceeding max_tokens gets truncated."""
+    from app.services.chunker import _count_tokens
+
+    header = "ROUTINE: X (subroutine)\nFILE: test.f\n\nSOURCE:\n"
+    long_line = "      " + "CALL FOO(BAR,BAZ)\n" * 80
+    unit = _make_unit(source_text=long_line)
+    chunks = chunk_units([unit], max_tokens=120)
+    for c in chunks:
+        assert _count_tokens(c.text) <= 120

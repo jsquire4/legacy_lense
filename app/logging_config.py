@@ -28,9 +28,6 @@ class JSONFormatter(logging.Formatter):
 
 def setup_logging(level: str = "INFO"):
     """Configure root logger with console + rotating JSON file handler."""
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
-
     root = logging.getLogger()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()
@@ -43,11 +40,16 @@ def setup_logging(level: str = "INFO"):
     ))
     root.addHandler(console)
 
-    # File — structured JSON, rotating 5 MB x 3 backups
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_dir / "legacylens.jsonl",
-        maxBytes=5 * 1024 * 1024,
-        backupCount=3,
-    )
-    file_handler.setFormatter(JSONFormatter())
-    root.addHandler(file_handler)
+    # File — structured JSON, rotating 5 MB x 3 backups (skip if not writable)
+    log_dir = Path("logs")
+    try:
+        log_dir.mkdir(exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_dir / "legacylens.jsonl",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=3,
+        )
+        file_handler.setFormatter(JSONFormatter())
+        root.addHandler(file_handler)
+    except OSError:
+        root.warning("Could not create logs/ directory — file logging disabled")

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LegacyLens — LAPACK Code Explorer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: #0d1117; color: #c9d1d9;
+            min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+            padding: 2rem 1rem;
+        }
+        h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; }
+        .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; }
+        .container { width: 100%; max-width: 800px; }
+        .input-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        textarea {
+            flex: 1; padding: 0.75rem; border: 1px solid #30363d;
+            background: #161b22; color: #c9d1d9; border-radius: 6px;
+            font-size: 0.95rem; resize: vertical; min-height: 60px;
+            font-family: inherit;
+        }
+        textarea:focus { outline: none; border-color: #58a6ff; }
+        button {
+            padding: 0.75rem 1.5rem; background: #238636; color: #fff;
+            border: none; border-radius: 6px; cursor: pointer;
+            font-size: 0.95rem; font-weight: 600; white-space: nowrap;
+        }
+        button:hover { background: #2ea043; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .capabilities {
+            display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;
+        }
+        .cap-btn {
+            padding: 0.4rem 0.8rem; background: #21262d; color: #8b949e;
+            border: 1px solid #30363d; border-radius: 20px; cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .cap-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
+        .cap-btn:hover { border-color: #58a6ff; }
+        .result {
+            background: #161b22; border: 1px solid #30363d;
+            border-radius: 6px; padding: 1.25rem; margin-top: 1rem;
+            display: none;
+        }
+        .result.visible { display: block; }
+        .result pre {
+            white-space: pre-wrap; word-wrap: break-word;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.9rem; line-height: 1.5;
+        }
+        .citations {
+            margin-top: 1rem; padding-top: 0.75rem;
+            border-top: 1px solid #30363d;
+        }
+        .citations h3 { color: #58a6ff; font-size: 0.85rem; margin-bottom: 0.4rem; }
+        .citations span {
+            display: inline-block; background: #21262d; padding: 0.2rem 0.5rem;
+            border-radius: 4px; font-size: 0.8rem; margin: 0.15rem;
+            font-family: monospace;
+        }
+        .meta { color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; }
+        .spinner { display: none; color: #58a6ff; margin: 1rem 0; }
+        .spinner.visible { display: block; }
+        .error { color: #f85149; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LegacyLens</h1>
+        <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
+
+        <div class="capabilities">
+            <button class="cap-btn active" data-cap="">General Query</button>
+            <button class="cap-btn" data-cap="explain_code">Explain Code</button>
+            <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
+            <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
+            <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
+        </div>
+
+        <div class="input-group">
+            <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
+            <button id="submit" onclick="submitQuery()">Ask</button>
+        </div>
+
+        <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
+
+        <div class="result" id="result">
+            <pre id="answer"></pre>
+            <div class="citations" id="citations-box">
+                <h3>Sources</h3>
+                <div id="citations"></div>
+            </div>
+            <div class="meta" id="meta"></div>
+        </div>
+    </div>
+
+    <script>
+        let selectedCapability = "";
+
+        document.querySelectorAll(".cap-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                document.querySelectorAll(".cap-btn").forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                selectedCapability = btn.dataset.cap;
+            });
+        });
+
+        document.getElementById("query").addEventListener("keydown", e => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submitQuery();
+            }
+        });
+
+        async function submitQuery() {
+            const query = document.getElementById("query").value.trim();
+            if (!query) return;
+
+            const submitBtn = document.getElementById("submit");
+            const spinner = document.getElementById("spinner");
+            const resultDiv = document.getElementById("result");
+
+            submitBtn.disabled = true;
+            spinner.classList.add("visible");
+            resultDiv.classList.remove("visible");
+
+            try {
+                const url = selectedCapability
+                    ? `/api/capabilities/${selectedCapability}`
+                    : "/api/query";
+
+                const res = await fetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ query }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
+
+                const data = await res.json();
+
+                document.getElementById("answer").textContent = data.answer;
+
+                const citationsDiv = document.getElementById("citations");
+                const citationsBox = document.getElementById("citations-box");
+                citationsDiv.innerHTML = "";
+
+                if (data.citations && data.citations.length > 0) {
+                    citationsBox.style.display = "block";
+                    data.citations.forEach(c => {
+                        const span = document.createElement("span");
+                        span.textContent = c;
+                        citationsDiv.appendChild(span);
+                    });
+                } else {
+                    citationsBox.style.display = "none";
+                }
+
+                document.getElementById("meta").textContent =
+                    `Latency: ${data.latency_ms}ms`;
+
+                resultDiv.classList.add("visible");
+            } catch (err) {
+                const errorSpan = document.createElement("span");
+                errorSpan.className = "error";
+                errorSpan.textContent = `Error: ${err.message}`;
+                const answerEl = document.getElementById("answer");
+                answerEl.textContent = "";
+                answerEl.appendChild(errorSpan);
+                resultDiv.classList.add("visible");
+            } finally {
+                submitBtn.disabled = false;
+                spinner.classList.remove("visible");
+            }
+        }
+    </script>
+</body>
+</html>

@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES
 
 client = TestClient(app)
 
@@ -203,10 +204,11 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     events = _parse_sse_events(response.text)
 
     progress_events = [e for e in events if e["event"] == "progress"]
-    assert len(progress_events) == 15
+    assert len(progress_events) == len(EVAL_QUERIES)
 
     first = progress_events[0]["data"]
     assert "query" in first
+    assert "capability" in first
     assert "recall_at_5" in first
     assert "latency_ms" in first
     assert "retrieved_files" in first
@@ -232,5 +234,45 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     summary = events[-1]["data"]
     assert "avg_recall_at_5" in summary
     assert "avg_latency_ms" in summary
-    assert summary["total_queries"] == 15
+    assert summary["total_queries"] == len(EVAL_QUERIES)
     assert 0.0 <= summary["avg_recall_at_5"] <= 1.0
+
+
+@patch("app.main.generate_answer")
+@patch("app.main.retrieve")
+def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
+    mock_retrieve.return_value = {
+        "chunks": [
+            {"id": "x1", "text": "t", "score": 0.9,
+             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
+        ],
+        "expanded_names": [],
+        "retrieval_strategy": "name_match",
+    }
+    mock_generate.return_value = {
+        "answer": "DGESV solves a linear system of equations using LU factorization with partial pivoting. It calls DGETRF and DGETRS. INFO parameter checks for errors. N must be positive. Cholesky symmetric factorization.",
+        "citations": ["dgesv.f:1-50"],
+        "model": "gpt-4o-mini",
+        "token_usage": {},
+    }
+
+    response = client.get("/api/eval/e2e/stream")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+    events = _parse_sse_events(response.text)
+    progress_events = [e for e in events if e["event"] == "progress"]
+    assert len(progress_events) == len(E2E_EVAL_QUERIES)
+
+    first = progress_events[0]["data"]
+    assert "passed" in first
+    assert "capability" in first
+    assert "checks" in first
+    assert "latency_ms" in first
+
+    assert events[-1]["event"] == "summary"
+    summary = events[-1]["data"]
+    assert "pass_rate" in summary
+    assert "passed" in summary
+    assert "failed" in summary
+    assert summary["total_queries"] == len(E2E_EVAL_QUERIES)

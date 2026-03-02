@@ -15,7 +15,7 @@ from app.services.retrieval import retrieve
 from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
-from app.eval_data import EVAL_QUERIES, compute_recall_at_k
+from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,7 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
 
 
 def _eval_stream_generator():
-    """Generator yielding SSE events for each eval query: progress*, summary."""
+    """Generator yielding SSE events for each retrieval eval query: progress*, summary."""
     total_recall = 0.0
     total_latency = 0.0
     n = len(EVAL_QUERIES)
@@ -284,6 +284,7 @@ def _eval_stream_generator():
         yield _sse_event("progress", {
             "index": i,
             "query": query,
+            "capability": item.get("capability"),
             "recall_at_5": round(recall, 4),
             "latency_ms": latency_ms,
             "retrieved_files": retrieved_files[:5],
@@ -297,10 +298,62 @@ def _eval_stream_generator():
     })
 
 
+def _e2e_eval_stream_generator():
+    """Generator yielding SSE events for e2e generation evals: progress*, summary."""
+    n = len(E2E_EVAL_QUERIES)
+    total_passed = 0
+    total_latency = 0.0
+
+    for i, item in enumerate(E2E_EVAL_QUERIES):
+        query = item["query"]
+        capability = item.get("capability")
+        checks = item["checks"]
+
+        t0 = time.time()
+        retrieval_result = retrieve(query, top_k=8)
+        chunks = retrieval_result["chunks"]
+        gen_result = generate_answer(query, chunks, capability)
+        latency_ms = round((time.time() - t0) * 1000, 1)
+
+        check_results = check_e2e_result(
+            gen_result["answer"], gen_result["citations"], checks,
+        )
+
+        if check_results["pass"]:
+            total_passed += 1
+        total_latency += latency_ms
+
+        yield _sse_event("progress", {
+            "index": i,
+            "query": query,
+            "capability": capability,
+            "passed": check_results["pass"],
+            "checks": check_results,
+            "latency_ms": latency_ms,
+            "citations_count": len(gen_result["citations"]),
+            "answer_length": len(gen_result["answer"]),
+        })
+
+    yield _sse_event("summary", {
+        "total_queries": n,
+        "passed": total_passed,
+        "failed": n - total_passed,
+        "pass_rate": round(total_passed / n, 4) if n else 0,
+        "avg_latency_ms": round(total_latency / n, 1) if n else 0,
+    })
+
+
 @app.get("/api/eval/stream")
 async def eval_stream_endpoint():
     def gen():
         yield from _eval_stream_generator()
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/eval/e2e/stream")
+async def e2e_eval_stream_endpoint():
+    def gen():
+        yield from _e2e_eval_stream_generator()
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 

@@ -127,7 +127,7 @@
         .eval-metrics { margin-bottom: 0.75rem; }
         .eval-rows { max-height: 350px; overflow-y: auto; }
         .eval-row {
-            display: grid; grid-template-columns: 1fr auto auto;
+            display: grid; grid-template-columns: 1fr auto auto auto;
             gap: 0.4rem; padding: 0.35rem 0; border-bottom: 1px solid #21262d;
             font-size: 0.78rem; align-items: center;
         }
@@ -138,6 +138,11 @@
         .eval-score.pass { color: #3fb950; }
         .eval-score.fail { color: #f85149; }
         .eval-row .eval-ms { color: #8b949e; font-size: 0.72rem; }
+        .eval-row .eval-cap {
+            font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 3px;
+            background: #1f6feb33; color: #58a6ff; font-weight: 600; white-space: nowrap;
+        }
+        .eval-cap.cap-null { background: #8b949e22; color: #8b949e; }
 
         /* Architecture */
         .arch-section { margin-bottom: 1.5rem; }
@@ -237,10 +242,11 @@
 
             <!-- RIGHT: Evals + Architecture -->
             <div class="col-right">
+                <!-- Retrieval Evals -->
                 <div class="panel">
-                    <h2 class="panel-title">Evals</h2>
+                    <h2 class="panel-title">Retrieval Evals</h2>
                     <div class="eval-controls">
-                        <button id="eval-btn" onclick="runEvals()">Run Evals</button>
+                        <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
                         <span class="eval-status" id="eval-status"></span>
                     </div>
                     <div class="eval-metrics" id="eval-metrics" style="display:none">
@@ -254,12 +260,38 @@
                                 <span>Avg Latency</span>
                             </div>
                             <div class="stat">
-                                <span class="stat-value" id="eval-progress">0 / 15</span>
+                                <span class="stat-value" id="eval-progress">—</span>
                                 <span>Queries</span>
                             </div>
                         </div>
                     </div>
                     <div class="eval-rows" id="eval-rows"></div>
+                </div>
+
+                <!-- E2E Generation Evals -->
+                <div class="panel">
+                    <h2 class="panel-title">E2E Generation Evals</h2>
+                    <div class="eval-controls">
+                        <button id="e2e-btn" onclick="runE2EEvals()">Run E2E</button>
+                        <span class="eval-status" id="e2e-status"></span>
+                    </div>
+                    <div class="eval-metrics" id="e2e-metrics" style="display:none">
+                        <div class="obs-stats">
+                            <div class="stat">
+                                <span class="stat-value" id="e2e-pass-rate">—</span>
+                                <span>Pass Rate</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value" id="e2e-latency">—</span>
+                                <span>Avg Latency</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value" id="e2e-progress">—</span>
+                                <span>Queries</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="eval-rows" id="e2e-rows"></div>
                 </div>
 
                 <div class="panel">
@@ -546,6 +578,11 @@
             }
         }
 
+        function capLabel(cap) {
+            if (!cap) return "general";
+            return cap.replace(/_/g, " ");
+        }
+
         async function runEvals() {
             const btn = document.getElementById("eval-btn");
             const statusEl = document.getElementById("eval-status");
@@ -561,11 +598,12 @@
             rowsDiv.innerHTML = "";
             recallEl.textContent = "—";
             latencyEl.textContent = "—";
-            progressEl.textContent = "0 / 15";
+            progressEl.textContent = "—";
 
             let runningRecall = 0;
             let runningLatency = 0;
             let completed = 0;
+            let total = 0;
 
             try {
                 const res = await fetch("/api/eval/stream");
@@ -588,21 +626,97 @@
 
                             recallEl.textContent = (runningRecall / completed).toFixed(3);
                             latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
-                            progressEl.textContent = `${completed} / 15`;
+                            progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
 
+                            const capClass = data.capability ? "" : " cap-null";
                             const row = document.createElement("div");
                             row.className = "eval-row";
                             const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
                             row.innerHTML = `
                                 <span class="eval-q" title="${data.query}">${data.query}</span>
+                                <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
                                 <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
                                 <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
                             `;
                             rowsDiv.appendChild(row);
                         } else if (event === "summary") {
+                            total = data.total_queries;
                             recallEl.textContent = data.avg_recall_at_5.toFixed(3);
                             latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
+                            progressEl.textContent = `${total} / ${total}`;
                             statusEl.textContent = "Done";
+                        }
+                    });
+                }
+            } catch (err) {
+                statusEl.textContent = `Error: ${err.message}`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function runE2EEvals() {
+            const btn = document.getElementById("e2e-btn");
+            const statusEl = document.getElementById("e2e-status");
+            const metricsDiv = document.getElementById("e2e-metrics");
+            const rowsDiv = document.getElementById("e2e-rows");
+            const passRateEl = document.getElementById("e2e-pass-rate");
+            const latencyEl = document.getElementById("e2e-latency");
+            const progressEl = document.getElementById("e2e-progress");
+
+            btn.disabled = true;
+            statusEl.textContent = "Running...";
+            metricsDiv.style.display = "block";
+            rowsDiv.innerHTML = "";
+            passRateEl.textContent = "—";
+            latencyEl.textContent = "—";
+            progressEl.textContent = "—";
+
+            let totalPassed = 0;
+            let runningLatency = 0;
+            let completed = 0;
+            let total = 0;
+
+            try {
+                const res = await fetch("/api/eval/e2e/stream");
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    buffer = processSSEBuffer(buffer, ({ event, data }) => {
+                        if (event === "progress") {
+                            completed++;
+                            if (data.passed) totalPassed++;
+                            runningLatency += data.latency_ms;
+
+                            passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
+                            latencyEl.textContent = (runningLatency / completed).toFixed(0) + "ms";
+                            progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
+
+                            const capClass = data.capability ? "" : " cap-null";
+                            const row = document.createElement("div");
+                            row.className = "eval-row";
+                            const passClass = data.passed ? "pass" : "fail";
+                            row.innerHTML = `
+                                <span class="eval-q" title="${data.query}">${data.query}</span>
+                                <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
+                                <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
+                                <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
+                            `;
+                            rowsDiv.appendChild(row);
+                        } else if (event === "summary") {
+                            total = data.total_queries;
+                            passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
+                            latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
+                            progressEl.textContent = `${total} / ${total}`;
+                            statusEl.textContent = `Done — ${data.passed}/${total} passed`;
                         }
                     });
                 }

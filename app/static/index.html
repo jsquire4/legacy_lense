@@ -15,33 +15,17 @@
         .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center; }
         .container { width: 100%; max-width: 1400px; margin: 0 auto; }
 
-        /* Two-column layout */
+        /* Two-column layout: left = chat + obs, right = evals + arch */
         .layout {
-            display: grid;
-            grid-template-columns: 1fr 400px;
-            grid-template-rows: auto 1fr;
-            gap: 1.5rem;
-            align-items: start;
-        }
-        .col-chat { grid-column: 1; grid-row: 1 / -1; }
-        .col-obs { grid-column: 2; grid-row: 1; }
-        .col-secondary { grid-column: 1 / -1; }
-        .secondary-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 1.5rem;
             align-items: start;
         }
+        .col-left, .col-right { min-width: 0; }
 
         @media (max-width: 900px) {
-            .layout {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto;
-            }
-            .col-chat { grid-column: 1; grid-row: auto; }
-            .col-obs { grid-column: 1; grid-row: auto; }
-            .col-secondary { grid-column: 1; }
-            .secondary-grid { grid-template-columns: 1fr; }
+            .layout { grid-template-columns: 1fr; }
         }
 
         /* Panels */
@@ -197,14 +181,16 @@
         <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
 
         <div class="layout">
-            <!-- LEFT: Chat -->
-            <div class="col-chat">
+            <!-- LEFT: Chat + Observability -->
+            <div class="col-left">
                 <div class="capabilities">
                     <button class="cap-btn active" data-cap="">General Query</button>
                     <button class="cap-btn" data-cap="explain_code">Explain Code</button>
                     <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
                     <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
                     <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
+                    <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
+                    <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
                 </div>
 
                 <div class="input-group">
@@ -222,11 +208,8 @@
                     </div>
                     <div class="meta" id="meta"></div>
                 </div>
-            </div>
 
-            <!-- RIGHT TOP: Observability -->
-            <div class="col-obs">
-                <div class="panel">
+                <div class="panel" style="margin-top:1rem">
                     <h2 class="panel-title">Observability</h2>
                     <div id="obs-empty" class="obs-empty">Run a query to see details</div>
                     <div class="obs-panel" id="obs-content" style="display:none">
@@ -252,126 +235,122 @@
                 </div>
             </div>
 
-            <!-- BOTTOM: Evals + Architecture side by side -->
-            <div class="col-secondary">
-                <div class="secondary-grid">
-                    <!-- Evals -->
-                    <div class="panel">
-                        <h2 class="panel-title">Evals</h2>
-                        <div class="eval-controls">
-                            <button id="eval-btn" onclick="runEvals()">Run Evals</button>
-                            <span class="eval-status" id="eval-status"></span>
-                        </div>
-                        <div class="eval-metrics" id="eval-metrics" style="display:none">
-                            <div class="obs-stats">
-                                <div class="stat">
-                                    <span class="stat-value" id="eval-recall">—</span>
-                                    <span>Recall@5</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-value" id="eval-latency">—</span>
-                                    <span>Avg Latency</span>
-                                </div>
-                                <div class="stat">
-                                    <span class="stat-value" id="eval-progress">0 / 15</span>
-                                    <span>Queries</span>
-                                </div>
+            <!-- RIGHT: Evals + Architecture -->
+            <div class="col-right">
+                <div class="panel">
+                    <h2 class="panel-title">Evals</h2>
+                    <div class="eval-controls">
+                        <button id="eval-btn" onclick="runEvals()">Run Evals</button>
+                        <span class="eval-status" id="eval-status"></span>
+                    </div>
+                    <div class="eval-metrics" id="eval-metrics" style="display:none">
+                        <div class="obs-stats">
+                            <div class="stat">
+                                <span class="stat-value" id="eval-recall">—</span>
+                                <span>Recall@5</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value" id="eval-latency">—</span>
+                                <span>Avg Latency</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-value" id="eval-progress">0 / 15</span>
+                                <span>Queries</span>
                             </div>
                         </div>
-                        <div class="eval-rows" id="eval-rows"></div>
+                    </div>
+                    <div class="eval-rows" id="eval-rows"></div>
+                </div>
+
+                <div class="panel">
+                    <h2 class="panel-title">Architecture</h2>
+                    <div class="arch-section">
+                        <h3>RAG Pipeline</h3>
+                        <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
+                        <div class="pipeline">
+                            <div class="pipeline-step">
+                                <div class="step-title">Query</div>
+                                <div class="step-tech">User NL input</div>
+                            </div>
+                            <span class="pipeline-arrow">&#8594;</span>
+                            <div class="pipeline-step">
+                                <div class="step-title">Embed</div>
+                                <div class="step-tech">text-embedding-3-small</div>
+                            </div>
+                            <span class="pipeline-arrow">&#8594;</span>
+                            <div class="pipeline-step">
+                                <div class="step-title">Hybrid Search</div>
+                                <div class="step-tech">Vector + Name match</div>
+                            </div>
+                            <span class="pipeline-arrow">&#8594;</span>
+                            <div class="pipeline-step">
+                                <div class="step-title">Context</div>
+                                <div class="step-tech">6K token budget</div>
+                            </div>
+                            <span class="pipeline-arrow">&#8594;</span>
+                            <div class="pipeline-step">
+                                <div class="step-title">Generate</div>
+                                <div class="step-tech">gpt-4o-mini</div>
+                            </div>
+                            <span class="pipeline-arrow">&#8594;</span>
+                            <div class="pipeline-step">
+                                <div class="step-title">Response</div>
+                                <div class="step-tech">Citations enforced</div>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Architecture -->
-                    <div class="panel">
-                        <h2 class="panel-title">Architecture</h2>
-                        <div class="arch-section">
-                            <h3>RAG Pipeline</h3>
-                            <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
-                            <div class="pipeline">
-                                <div class="pipeline-step">
-                                    <div class="step-title">Query</div>
-                                    <div class="step-tech">User NL input</div>
-                                </div>
-                                <span class="pipeline-arrow">&#8594;</span>
-                                <div class="pipeline-step">
-                                    <div class="step-title">Embed</div>
-                                    <div class="step-tech">text-embedding-3-small</div>
-                                </div>
-                                <span class="pipeline-arrow">&#8594;</span>
-                                <div class="pipeline-step">
-                                    <div class="step-title">Hybrid Search</div>
-                                    <div class="step-tech">Vector + Name match</div>
-                                </div>
-                                <span class="pipeline-arrow">&#8594;</span>
-                                <div class="pipeline-step">
-                                    <div class="step-title">Context</div>
-                                    <div class="step-tech">6K token budget</div>
-                                </div>
-                                <span class="pipeline-arrow">&#8594;</span>
-                                <div class="pipeline-step">
-                                    <div class="step-title">Generate</div>
-                                    <div class="step-tech">gpt-4o-mini</div>
-                                </div>
-                                <span class="pipeline-arrow">&#8594;</span>
-                                <div class="pipeline-step">
-                                    <div class="step-title">Response</div>
-                                    <div class="step-tech">Citations enforced</div>
-                                </div>
+                    <div class="arch-section">
+                        <h3>Key Stats</h3>
+                        <div class="stats-grid">
+                            <div class="stat-card">
+                                <div class="stat-num">2,272</div>
+                                <div class="stat-label">Fortran files indexed</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-num">2,334</div>
+                                <div class="stat-label">Chunks stored</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-num">0.96</div>
+                                <div class="stat-label">Recall@5</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-num">&lt;3s</div>
+                                <div class="stat-label">End-to-end latency</div>
                             </div>
                         </div>
+                    </div>
 
-                        <div class="arch-section">
-                            <h3>Key Stats</h3>
-                            <div class="stats-grid">
-                                <div class="stat-card">
-                                    <div class="stat-num">2,272</div>
-                                    <div class="stat-label">Fortran files indexed</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-num">2,334</div>
-                                    <div class="stat-label">Chunks stored</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-num">0.96</div>
-                                    <div class="stat-label">Recall@5</div>
-                                </div>
-                                <div class="stat-card">
-                                    <div class="stat-num">&lt;3s</div>
-                                    <div class="stat-label">End-to-end latency</div>
-                                </div>
-                            </div>
-                        </div>
+                    <div class="arch-section">
+                        <h3>Retrieval Strategy</h3>
+                        <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
+                        <ul class="component-list">
+                            <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
+                            <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
+                            <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
+                            <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
+                        </ul>
+                    </div>
 
-                        <div class="arch-section">
-                            <h3>Retrieval Strategy</h3>
-                            <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
-                            <ul class="component-list">
-                                <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
-                                <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
-                                <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
-                                <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
-                            </ul>
-                        </div>
+                    <div class="arch-section">
+                        <h3>Components</h3>
+                        <ul class="component-list">
+                            <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
+                            <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
+                            <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
+                            <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
+                            <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
+                        </ul>
+                    </div>
 
-                        <div class="arch-section">
-                            <h3>Components</h3>
-                            <ul class="component-list">
-                                <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
-                                <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
-                                <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, gpt-4o-mini for generation</span></li>
-                                <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
-                                <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
-                            </ul>
-                        </div>
-
-                        <div class="arch-section">
-                            <h3>Deployment</h3>
-                            <ul class="component-list">
-                                <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
-                                <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
-                                <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
-                            </ul>
-                        </div>
+                    <div class="arch-section">
+                        <h3>Deployment</h3>
+                        <ul class="component-list">
+                            <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
+                            <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
+                            <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
+                        </ul>
                     </div>
                 </div>
             </div>

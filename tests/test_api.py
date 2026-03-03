@@ -1,6 +1,6 @@
 """Smoke tests for FastAPI endpoints."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,8 +22,8 @@ def test_root_serves_html():
     assert "LegacyLens" in response.text
 
 
-@patch("app.main.generate_answer")
-@patch("app.main.retrieve")
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint(mock_retrieve, mock_generate):
     mock_retrieve.return_value = {
         "chunks": [
@@ -47,8 +47,8 @@ def test_query_endpoint(mock_retrieve, mock_generate):
     assert "latency_ms" in data
 
 
-@patch("app.main.generate_answer")
-@patch("app.main.retrieve")
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_capability_endpoint(mock_retrieve, mock_generate):
     mock_retrieve.return_value = {
         "chunks": [{"id": "abc123", "text": "test", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
@@ -127,7 +127,7 @@ def _parse_sse_events(text: str) -> list[dict]:
 
 
 @patch("app.main.generate_answer_stream")
-@patch("app.main.retrieve")
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_stream_endpoint(mock_retrieve, mock_stream):
     mock_retrieve.return_value = {
         "chunks": [
@@ -136,11 +136,13 @@ def test_query_stream_endpoint(mock_retrieve, mock_stream):
         "expanded_names": [],
         "retrieval_strategy": "vector",
     }
-    mock_stream.return_value = iter([
-        {"type": "token", "token": "Hello"},
-        {"type": "token", "token": " world"},
-        {"type": "done", "citations": ["test.f:1-10"], "token_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}},
-    ])
+
+    async def async_gen(*args, **kwargs):
+        yield {"type": "token", "token": "Hello"}
+        yield {"type": "token", "token": " world"}
+        yield {"type": "done", "citations": ["test.f:1-10"], "token_usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+
+    mock_stream.side_effect = async_gen
 
     response = client.post("/api/query/stream", json={"query": "What is DGESV?"})
     assert response.status_code == 200
@@ -154,17 +156,19 @@ def test_query_stream_endpoint(mock_retrieve, mock_stream):
 
 
 @patch("app.main.generate_answer_stream")
-@patch("app.main.retrieve")
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_capability_stream_endpoint(mock_retrieve, mock_stream):
     mock_retrieve.return_value = {
         "chunks": [{"id": "abc123", "text": "test", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
         "expanded_names": [],
         "retrieval_strategy": "vector",
     }
-    mock_stream.return_value = iter([
-        {"type": "token", "token": "Explained"},
-        {"type": "done", "citations": [], "token_usage": {}},
-    ])
+
+    async def async_gen(*args, **kwargs):
+        yield {"type": "token", "token": "Explained"}
+        yield {"type": "done", "citations": [], "token_usage": {}}
+
+    mock_stream.side_effect = async_gen
 
     response = client.post("/api/capabilities/explain_code/stream", json={"query": "Explain DGESV"})
     assert response.status_code == 200
@@ -173,7 +177,7 @@ def test_capability_stream_endpoint(mock_retrieve, mock_stream):
     assert events[-1]["event"] == "done"
 
 
-@patch("app.main.retrieve")
+@patch("app.main._sync_retrieve")
 def test_eval_stream_returns_sse(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -189,7 +193,7 @@ def test_eval_stream_returns_sse(mock_retrieve):
     assert response.headers["content-type"].startswith("text/event-stream")
 
 
-@patch("app.main.retrieve")
+@patch("app.main._sync_retrieve")
 def test_eval_stream_emits_progress_events(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -216,7 +220,7 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     assert first["index"] == 0
 
 
-@patch("app.main.retrieve")
+@patch("app.main._sync_retrieve")
 def test_eval_stream_summary_is_last_event(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -238,8 +242,8 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     assert 0.0 <= summary["avg_recall_at_5"] <= 1.0
 
 
-@patch("app.main.generate_answer")
-@patch("app.main.retrieve")
+@patch("app.main.generate_answer_sync")
+@patch("app.main._sync_retrieve")
 def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     mock_retrieve.return_value = {
         "chunks": [

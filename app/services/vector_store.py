@@ -3,7 +3,7 @@
 import logging
 import uuid
 
-from qdrant_client import QdrantClient
+from qdrant_client import AsyncQdrantClient, QdrantClient
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -27,6 +27,25 @@ BATCH_SIZE = 100
 def get_qdrant_client() -> QdrantClient:
     settings = get_settings()
     return QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
+
+
+@lru_cache
+def get_async_qdrant_client() -> AsyncQdrantClient:
+    settings = get_settings()
+    return AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
+
+
+def _format_hits(points) -> list[dict]:
+    """Convert Qdrant points to hit dicts."""
+    return [
+        {
+            "id": point.id,
+            "score": point.score,
+            "text": point.payload.get("text", ""),
+            "metadata": {k: v for k, v in point.payload.items() if k != "text"},
+        }
+        for point in points
+    ]
 
 
 def ensure_collection() -> None:
@@ -102,6 +121,8 @@ def upsert_chunks(chunks: list[Chunk], embeddings: list[list[float]]) -> None:
         logger.info("Upserted batch %d-%d of %d points", i, i + len(batch), len(points))
 
 
+# --- Sync versions (used by ingestion + eval) ---
+
 def search(query_embedding: list[float], top_k: int = 8) -> list[dict]:
     """Search for similar vectors using query_points."""
     settings = get_settings()
@@ -113,19 +134,7 @@ def search(query_embedding: list[float], top_k: int = 8) -> list[dict]:
         limit=top_k,
         with_payload=True,
     )
-
-    hits = []
-    for point in results.points:
-        hits.append({
-            "id": point.id,
-            "score": point.score,
-            "text": point.payload.get("text", ""),
-            "metadata": {
-                k: v for k, v in point.payload.items() if k != "text"
-            },
-        })
-
-    return hits
+    return _format_hits(results.points)
 
 
 def search_by_name(query_embedding: list[float], unit_name: str, top_k: int = 3) -> list[dict]:
@@ -142,16 +151,37 @@ def search_by_name(query_embedding: list[float], unit_name: str, top_k: int = 3)
         limit=top_k,
         with_payload=True,
     )
+    return _format_hits(results.points)
 
-    hits = []
-    for point in results.points:
-        hits.append({
-            "id": point.id,
-            "score": point.score,
-            "text": point.payload.get("text", ""),
-            "metadata": {
-                k: v for k, v in point.payload.items() if k != "text"
-            },
-        })
 
-    return hits
+# --- Async versions (used by API endpoints) ---
+
+async def async_search(query_embedding: list[float], top_k: int = 8) -> list[dict]:
+    """Async search for similar vectors."""
+    settings = get_settings()
+    client = get_async_qdrant_client()
+
+    results = await client.query_points(
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        query=query_embedding,
+        limit=top_k,
+        with_payload=True,
+    )
+    return _format_hits(results.points)
+
+
+async def async_search_by_name(query_embedding: list[float], unit_name: str, top_k: int = 3) -> list[dict]:
+    """Async search with a unit_name filter."""
+    settings = get_settings()
+    client = get_async_qdrant_client()
+
+    results = await client.query_points(
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        query=query_embedding,
+        query_filter=Filter(
+            must=[FieldCondition(key="unit_name", match=MatchValue(value=unit_name))]
+        ),
+        limit=top_k,
+        with_payload=True,
+    )
+    return _format_hits(results.points)

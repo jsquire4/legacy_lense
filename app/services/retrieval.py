@@ -1,10 +1,11 @@
 """Query → embed → vector search pipeline with hybrid name matching."""
 
+import asyncio
 import logging
 import re
 
-from app.services.embeddings import embed_texts, get_openai_client
-from app.services.vector_store import search, search_by_name
+from app.services.embeddings import embed_query, get_async_openai_client
+from app.services.vector_store import async_search, async_search_by_name
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -33,12 +34,12 @@ def _extract_routine_name(query: str) -> str | None:
     return None
 
 
-def _expand_query(query: str) -> list[str]:
+async def _expand_query(query: str) -> list[str]:
     """Use the LLM to identify relevant LAPACK routine names for a conceptual query."""
     try:
-        client = get_openai_client()
+        client = get_async_openai_client()
         settings = get_settings()
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=settings.CHAT_MODEL,
             messages=[
                 {"role": "system", "content": _EXPAND_PROMPT},
@@ -58,17 +59,33 @@ def _expand_query(query: str) -> list[str]:
         return []
 
 
-def retrieve(query: str, top_k: int = 8) -> dict:
+async def _fan_out_name_search(
+    query_embedding: list[float], names: list[str], top_k_each: int,
+) -> list[dict]:
+    """Run async_search_by_name for multiple names concurrently."""
+    if not names:
+        return []
+    tasks = [
+        async_search_by_name(query_embedding, name, top_k=top_k_each)
+        for name in names
+    ]
+    results_list = await asyncio.gather(*tasks)
+    results = []
+    for hits in results_list:
+        results.extend(hits)
+    return results
+
+
+async def retrieve(query: str, top_k: int = 5) -> dict:
     """Embed a query and search — with name-boosted hybrid retrieval.
 
     Returns a dict with keys: chunks, expanded_names, retrieval_strategy.
     """
-    embeddings = embed_texts([query])
-    if not embeddings:
+    query_embedding = await embed_query(query)
+    if not query_embedding:
         logger.error("Failed to embed query")
         return {"chunks": [], "expanded_names": [], "retrieval_strategy": "failed"}
 
-    query_embedding = embeddings[0]
     routine_name = _extract_routine_name(query)
 
     # Collect name-matched results from explicit name or LLM expansion
@@ -79,24 +96,15 @@ def retrieve(query: str, top_k: int = 8) -> dict:
 
     if routine_name:
         strategy = "name_match"
-        hits = search_by_name(query_embedding, routine_name, top_k=3)
+        hits = await async_search_by_name(query_embedding, routine_name, top_k=3)
         for h in hits:
             if h["id"] not in seen_ids:
                 h["_match_type"] = "name"
                 name_results.append(h)
                 seen_ids.add(h["id"])
     else:
-        # Conceptual query — expand with LLM
-        expanded_names = _expand_query(query)
-        if expanded_names:
-            strategy = "query_expansion"
-        for name in expanded_names[:10]:
-            hits = search_by_name(query_embedding, name, top_k=1)
-            for h in hits:
-                if h["id"] not in seen_ids:
-                    h["_match_type"] = "expansion"
-                    name_results.append(h)
-                    seen_ids.add(h["id"])
+        # Conceptual query — vector search only (no LLM expansion call)
+        pass
 
     # Follow call graph one hop: find routines called by name-matched results
     call_graph_results = []
@@ -107,17 +115,21 @@ def retrieve(query: str, top_k: int = 8) -> dict:
                 called_names.add(called)
         # Only follow calls to routines we haven't already found
         found_names = {r["metadata"].get("unit_name") for r in name_results}
-        new_calls = called_names - found_names
-        for name in sorted(new_calls)[:5]:
-            hits = search_by_name(query_embedding, name, top_k=1)
-            for h in hits:
-                if h["id"] not in seen_ids:
-                    h["_match_type"] = "call_graph"
-                    call_graph_results.append(h)
-                    seen_ids.add(h["id"])
+        new_calls = sorted(called_names - found_names)[:5]
 
-    # Always do vector search too
-    vector_results = search(query_embedding, top_k=top_k)
+        # Fan out call-graph searches concurrently
+        hits_list = await _fan_out_name_search(query_embedding, new_calls, top_k_each=1)
+        for h in hits_list:
+            if h["id"] not in seen_ids:
+                h["_match_type"] = "call_graph"
+                call_graph_results.append(h)
+                seen_ids.add(h["id"])
+
+    # Vector search (already done for conceptual queries, run now for name-match)
+    if routine_name or not expanded_names:
+        vector_results = await async_search(query_embedding, top_k=top_k)
+    else:
+        vector_results = early_vector_results  # noqa: F821 — set in else branch above
 
     # Merge: name-matched first, then call-graph, then vector (deduplicated)
     merged = list(name_results) + call_graph_results

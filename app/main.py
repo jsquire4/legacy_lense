@@ -1,6 +1,9 @@
 import asyncio
+import hashlib
+import json
 import logging
 import time
+from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,7 +15,9 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.services.retrieval import retrieve
-from app.services.generation import generate_answer, generate_answer_stream
+from app.services.generation import generate_answer, generate_answer_stream, generate_answer_sync
+from app.services.vector_store import search, search_by_name
+from app.services.embeddings import embed_texts
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
@@ -20,6 +25,32 @@ from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, c
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "static"
+
+# --- Response cache for repeated queries (TTL-based, max 64 entries) ---
+_RESPONSE_CACHE: OrderedDict[str, tuple[float, "QueryResponse"]] = OrderedDict()
+_CACHE_MAX = 64
+_CACHE_TTL = 300  # 5 minutes
+
+
+def _cache_key(query: str, top_k: int, capability: str | None) -> str:
+    raw = f"{query}|{top_k}|{capability}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _cache_get(key: str):
+    if key in _RESPONSE_CACHE:
+        ts, resp = _RESPONSE_CACHE[key]
+        if time.time() - ts < _CACHE_TTL:
+            _RESPONSE_CACHE.move_to_end(key)
+            return resp
+        del _RESPONSE_CACHE[key]
+    return None
+
+
+def _cache_put(key: str, resp):
+    _RESPONSE_CACHE[key] = (time.time(), resp)
+    if len(_RESPONSE_CACHE) > _CACHE_MAX:
+        _RESPONSE_CACHE.popitem(last=False)
 
 
 @asynccontextmanager
@@ -94,27 +125,13 @@ def health():
     return {"status": "ok"}
 
 
-def _build_response(query: str, top_k: int, capability: str | None = None) -> QueryResponse:
-    """Shared logic for query and capability endpoints."""
-    t0 = time.time()
-
-    retrieval_result = retrieve(query, top_k)
-    chunks = retrieval_result["chunks"]
-    t_retrieval = time.time()
-
-    result = generate_answer(query, chunks, capability)
-    t_generation = time.time()
-
-    retrieval_ms = round((t_retrieval - t0) * 1000, 1)
-    generation_ms = round((t_generation - t_retrieval) * 1000, 1)
-    total_ms = round((t_generation - t0) * 1000, 1)
-
-    # Build chunk details for observability
-    chunk_details = []
+def _build_chunk_details(chunks: list[dict]) -> list[ChunkDetail]:
+    """Build chunk details for observability."""
+    details = []
     for i, chunk in enumerate(chunks):
         meta = chunk.get("metadata", {})
         file_path = meta.get("file_path", "")
-        chunk_details.append(ChunkDetail(
+        details.append(ChunkDetail(
             rank=i + 1,
             chunk_id=str(chunk.get("id", "")),
             file_name=Path(file_path).name if file_path else "",
@@ -122,6 +139,31 @@ def _build_response(query: str, top_k: int, capability: str | None = None) -> Qu
             score=round(chunk.get("score", 0.0), 4),
             match_type=chunk.get("_match_type", "vector"),
         ))
+    return details
+
+
+async def _build_response(query: str, top_k: int, capability: str | None = None) -> QueryResponse:
+    """Shared logic for query and capability endpoints."""
+    key = _cache_key(query, top_k, capability)
+    cached = _cache_get(key)
+    if cached is not None:
+        logger.info("Cache hit for query: %.80s", query)
+        return cached
+
+    t0 = time.time()
+
+    retrieval_result = await retrieve(query, top_k)
+    chunks = retrieval_result["chunks"]
+    t_retrieval = time.time()
+
+    result = await generate_answer(query, chunks, capability)
+    t_generation = time.time()
+
+    retrieval_ms = round((t_retrieval - t0) * 1000, 1)
+    generation_ms = round((t_generation - t_retrieval) * 1000, 1)
+    total_ms = round((t_generation - t0) * 1000, 1)
+
+    chunk_details = _build_chunk_details(chunks)
 
     token_usage_raw = result.get("token_usage", {})
     token_usage = TokenUsage(
@@ -142,7 +184,7 @@ def _build_response(query: str, top_k: int, capability: str | None = None) -> Qu
         },
     )
 
-    return QueryResponse(
+    response = QueryResponse(
         answer=result["answer"],
         citations=result["citations"],
         latency_ms=total_ms,
@@ -158,34 +200,32 @@ def _build_response(query: str, top_k: int, capability: str | None = None) -> Qu
             total_ms=total_ms,
         ),
     )
+    _cache_put(key, response)
+    return response
 
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _build_response, req.query, req.top_k, None)
+    return await _build_response(req.query, req.top_k, None)
 
 
 @app.post("/api/capabilities/{capability}", response_model=QueryResponse)
 async def capability_endpoint(capability: str, req: CapabilityRequest):
     if capability not in CAPABILITIES:
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _build_response, req.query, req.top_k, capability)
+    return await _build_response(req.query, req.top_k, capability)
 
 
 def _sse_event(event: str, data: dict) -> str:
     """Format a single SSE event."""
-    import json
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def _stream_generator(query: str, top_k: int, capability: str | None = None):
-    """Generator that yields SSE events: retrieval, token*, done."""
-    import json
+async def _stream_generator(query: str, top_k: int, capability: str | None = None):
+    """Async generator that yields SSE events: retrieval, token*, done."""
     t0 = time.time()
 
-    retrieval_result = retrieve(query, top_k)
+    retrieval_result = await retrieve(query, top_k)
     chunks = retrieval_result["chunks"]
     t_retrieval = time.time()
     retrieval_ms = round((t_retrieval - t0) * 1000, 1)
@@ -214,7 +254,7 @@ def _stream_generator(query: str, top_k: int, capability: str | None = None):
     })
 
     # Stream generation tokens
-    for event in generate_answer_stream(query, chunks, capability):
+    async for event in generate_answer_stream(query, chunks, capability):
         if event["type"] == "token":
             yield _sse_event("token", {"token": event["token"]})
         elif event["type"] == "done":
@@ -234,12 +274,10 @@ def _stream_generator(query: str, top_k: int, capability: str | None = None):
 
 @app.post("/api/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
-    loop = asyncio.get_event_loop()
-
-    def gen():
-        yield from _stream_generator(req.query, req.top_k, None)
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        _stream_generator(req.query, req.top_k, None),
+        media_type="text/event-stream",
+    )
 
 
 @app.post("/api/capabilities/{capability}/stream")
@@ -247,10 +285,36 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
     if capability not in CAPABILITIES:
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
 
-    def gen():
-        yield from _stream_generator(req.query, req.top_k, capability)
+    return StreamingResponse(
+        _stream_generator(req.query, req.top_k, capability),
+        media_type="text/event-stream",
+    )
 
-    return StreamingResponse(gen(), media_type="text/event-stream")
+
+# --- Eval endpoints (sync — not latency-critical) ---
+
+def _sync_retrieve(query: str, top_k: int = 5) -> dict:
+    """Sync retrieval for eval generators using sync clients."""
+    from app.services.embeddings import embed_texts
+    from app.services.vector_store import search, search_by_name
+    import re
+
+    embeddings = embed_texts([query])
+    if not embeddings:
+        return {"chunks": [], "expanded_names": [], "retrieval_strategy": "failed"}
+
+    query_embedding = embeddings[0]
+
+    # Simple vector search for evals
+    vector_results = search(query_embedding, top_k=top_k)
+    for r in vector_results:
+        r.setdefault("_match_type", "vector")
+
+    return {
+        "chunks": vector_results,
+        "expanded_names": [],
+        "retrieval_strategy": "vector",
+    }
 
 
 def _eval_stream_generator():
@@ -264,7 +328,7 @@ def _eval_stream_generator():
         expected = item["expected_files"]
 
         t0 = time.time()
-        result = retrieve(query, top_k=5)
+        result = _sync_retrieve(query, top_k=5)
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         retrieved_files = []
@@ -310,9 +374,9 @@ def _e2e_eval_stream_generator():
         checks = item["checks"]
 
         t0 = time.time()
-        retrieval_result = retrieve(query, top_k=8)
+        retrieval_result = _sync_retrieve(query, top_k=8)
         chunks = retrieval_result["chunks"]
-        gen_result = generate_answer(query, chunks, capability)
+        gen_result = generate_answer_sync(query, chunks, capability)
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         check_results = check_e2e_result(

@@ -7,14 +7,14 @@ from pathlib import Path
 import tiktoken
 
 from app.config import get_settings
-from app.services.embeddings import get_openai_client
+from app.services.embeddings import get_async_openai_client, get_openai_client
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
 _encoder = tiktoken.get_encoding("cl100k_base")
 
-CONTEXT_TOKEN_BUDGET = 6000
+CONTEXT_TOKEN_BUDGET = 2000
 
 
 def _count_tokens(text: str) -> int:
@@ -65,23 +65,8 @@ def _build_citation_fallback(chunks: list[dict]) -> list[str]:
     return list(dict.fromkeys(citations))  # dedupe preserving order
 
 
-def generate_answer(
-    query: str,
-    chunks: list[dict],
-    capability: str | None = None,
-) -> dict:
-    """Generate an answer using retrieved context chunks."""
-    settings = get_settings()
-    client = get_openai_client()
-
-    if not chunks:
-        return {
-            "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
-            "citations": [],
-            "model": settings.CHAT_MODEL,
-            "token_usage": {},
-        }
-
+def _build_messages(query: str, chunks: list[dict], capability: str | None = None):
+    """Build the messages list for the LLM call."""
     context = _assemble_context(chunks)
 
     if capability and capability in CAPABILITIES:
@@ -97,14 +82,36 @@ def generate_answer(
 
 Question: {query}"""
 
-    response = client.chat.completions.create(
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+
+
+async def generate_answer(
+    query: str,
+    chunks: list[dict],
+    capability: str | None = None,
+) -> dict:
+    """Generate an answer using retrieved context chunks."""
+    settings = get_settings()
+    client = get_async_openai_client()
+
+    if not chunks:
+        return {
+            "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
+            "citations": [],
+            "model": settings.CHAT_MODEL,
+            "token_usage": {},
+        }
+
+    messages = _build_messages(query, chunks, capability)
+
+    response = await client.chat.completions.create(
         model=settings.CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
+        messages=messages,
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=800,
     )
 
     answer_text = ""
@@ -138,7 +145,7 @@ Question: {query}"""
     }
 
 
-def generate_answer_stream(
+async def generate_answer_stream(
     query: str,
     chunks: list[dict],
     capability: str | None = None,
@@ -150,7 +157,7 @@ def generate_answer_stream(
         {"type": "done", "citations": list, "token_usage": dict} — final
     """
     settings = get_settings()
-    client = get_openai_client()
+    client = get_async_openai_client()
 
     if not chunks:
         yield {
@@ -160,29 +167,13 @@ def generate_answer_stream(
         yield {"type": "done", "citations": [], "token_usage": {}}
         return
 
-    context = _assemble_context(chunks)
+    messages = _build_messages(query, chunks, capability)
 
-    if capability and capability in CAPABILITIES:
-        system_prompt = CAPABILITIES[capability]
-    else:
-        system_prompt = DEFAULT_SYSTEM_PROMPT
-
-    user_message = f"""Context from the LAPACK Fortran codebase:
-
-{context}
-
----
-
-Question: {query}"""
-
-    stream = client.chat.completions.create(
+    stream = await client.chat.completions.create(
         model=settings.CHAT_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ],
+        messages=messages,
         temperature=0.1,
-        max_tokens=2000,
+        max_tokens=800,
         stream=True,
         stream_options={"include_usage": True},
     )
@@ -190,7 +181,7 @@ Question: {query}"""
     accumulated = []
     token_usage = {}
 
-    for chunk in stream:
+    async for chunk in stream:
         if chunk.usage is not None:
             token_usage = {
                 "prompt_tokens": chunk.usage.prompt_tokens,
@@ -214,3 +205,60 @@ Question: {query}"""
             yield {"type": "token", "token": suffix}
 
     yield {"type": "done", "citations": citations, "token_usage": token_usage}
+
+
+# --- Sync version (used by eval generators) ---
+
+def generate_answer_sync(
+    query: str,
+    chunks: list[dict],
+    capability: str | None = None,
+) -> dict:
+    """Sync generate_answer for eval generators."""
+    settings = get_settings()
+    client = get_openai_client()
+
+    if not chunks:
+        return {
+            "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
+            "citations": [],
+            "model": settings.CHAT_MODEL,
+            "token_usage": {},
+        }
+
+    messages = _build_messages(query, chunks, capability)
+
+    response = client.chat.completions.create(
+        model=settings.CHAT_MODEL,
+        messages=messages,
+        temperature=0.1,
+        max_tokens=800,
+    )
+
+    answer_text = ""
+    if len(response.choices) > 0:
+        message = response.choices[0].message
+        if message.content is not None:
+            answer_text = message.content
+
+    citations = _extract_citations_from_text(answer_text)
+
+    if not citations:
+        citations = _build_citation_fallback(chunks[:5])
+        if citations:
+            answer_text += "\n\nSources: " + ", ".join(citations)
+
+    token_usage = {}
+    if response.usage is not None:
+        token_usage = {
+            "prompt_tokens": response.usage.prompt_tokens,
+            "completion_tokens": response.usage.completion_tokens,
+            "total_tokens": response.usage.total_tokens,
+        }
+
+    return {
+        "answer": answer_text,
+        "citations": citations,
+        "model": settings.CHAT_MODEL,
+        "token_usage": token_usage,
+    }

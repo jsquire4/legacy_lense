@@ -4,7 +4,7 @@ import logging
 from functools import lru_cache
 
 import tiktoken
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 from app.config import get_settings
 
@@ -21,12 +21,50 @@ def get_openai_client() -> OpenAI:
     return OpenAI(api_key=settings.OPENAI_API_KEY, max_retries=3)
 
 
+@lru_cache
+def get_async_openai_client() -> AsyncOpenAI:
+    settings = get_settings()
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=3)
+
+
 def _truncate_to_tokens(text: str, max_tokens: int) -> str:
     tokens = _encoder.encode(text)
     if len(tokens) <= max_tokens:
         return text
     return _encoder.decode(tokens[:max_tokens])
 
+
+# --- Async query path (used by API endpoints) ---
+
+_embed_cache: dict[str, list[float]] = {}
+_EMBED_CACHE_MAX = 128
+
+
+async def embed_query(text: str) -> list[float]:
+    """Embed a single query string with in-memory cache. Returns cached result on repeat queries."""
+    if text in _embed_cache:
+        return _embed_cache[text]
+
+    settings = get_settings()
+    client = get_async_openai_client()
+    truncated = _truncate_to_tokens(text, settings.MAX_CHUNK_TOKENS)
+
+    response = await client.embeddings.create(
+        model=settings.EMBEDDING_MODEL,
+        input=[truncated],
+    )
+    embedding = response.data[0].embedding
+
+    # Evict oldest if full
+    if len(_embed_cache) >= _EMBED_CACHE_MAX:
+        oldest = next(iter(_embed_cache))
+        del _embed_cache[oldest]
+    _embed_cache[text] = embedding
+
+    return embedding
+
+
+# --- Sync batch path (used by ingestion scripts) ---
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed a list of texts using OpenAI's embedding API. Handles batching and truncation."""

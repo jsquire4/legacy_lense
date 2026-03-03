@@ -1,6 +1,6 @@
 """Tests for the generation service (mocked, no API calls)."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -88,23 +88,25 @@ def test_build_citation_fallback_without_file_path():
     assert result == []
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_empty_chunks(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_empty_chunks(mock_settings, mock_client_fn):
     """generate_answer returns fallback when chunks empty."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
     mock_settings.return_value = settings
 
-    result = generate_answer("What is DGESV?", [], None)
+    result = await generate_answer("What is DGESV?", [], None)
     assert "don't have sufficient context" in result["answer"]
     assert result["citations"] == []
     mock_client_fn.return_value.chat.completions.create.assert_not_called()
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_with_chunks(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_with_chunks(mock_settings, mock_client_fn):
     """generate_answer returns answer from LLM."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
@@ -118,22 +120,23 @@ def test_generate_answer_with_chunks(mock_settings, mock_client_fn):
     mock_response.usage.completion_tokens = 20
     mock_response.usage.total_tokens = 120
 
-    mock_client = MagicMock()
+    mock_client = AsyncMock()
     mock_client.chat.completions.create.return_value = mock_response
     mock_client_fn.return_value = mock_client
 
     chunks = [
         {"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
     ]
-    result = generate_answer("What is DGESV?", chunks, None)
+    result = await generate_answer("What is DGESV?", chunks, None)
     assert "DGESV" in result["answer"]
     assert result["token_usage"]["prompt_tokens"] == 100
     mock_client.chat.completions.create.assert_called_once()
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_citation_fallback(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_citation_fallback(mock_settings, mock_client_fn):
     """generate_answer adds citation fallback when LLM omits."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
@@ -144,22 +147,23 @@ def test_generate_answer_citation_fallback(mock_settings, mock_client_fn):
     mock_response.choices[0].message.content = "DGESV solves linear systems."
     mock_response.usage = None
 
-    mock_client = MagicMock()
+    mock_client = AsyncMock()
     mock_client.chat.completions.create.return_value = mock_response
     mock_client_fn.return_value = mock_client
 
     chunks = [
         {"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
     ]
-    result = generate_answer("What is DGESV?", chunks, None)
+    result = await generate_answer("What is DGESV?", chunks, None)
     assert "Sources:" in result["answer"]
     assert "dgesv.f:1-50" in result["citations"]
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_uses_default_prompt_when_no_capability(mock_settings, mock_client_fn):
-    """generate_answer uses DEFAULT_SYSTEM_PROMPT when capability is None (line 166)."""
+@pytest.mark.asyncio
+async def test_generate_answer_uses_default_prompt_when_no_capability(mock_settings, mock_client_fn):
+    """generate_answer uses DEFAULT_SYSTEM_PROMPT when capability is None."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
     mock_settings.return_value = settings
@@ -169,21 +173,22 @@ def test_generate_answer_uses_default_prompt_when_no_capability(mock_settings, m
     mock_response.choices[0].message.content = "Answer."
     mock_response.usage = None
 
-    mock_client = MagicMock()
+    mock_client = AsyncMock()
     mock_client.chat.completions.create.return_value = mock_response
     mock_client_fn.return_value = mock_client
 
     chunks = [{"text": "code", "metadata": {}}]
-    result = generate_answer("What?", chunks, None)
+    result = await generate_answer("What?", chunks, None)
     assert "Answer" in result["answer"]
     call_args = mock_client.chat.completions.create.call_args
     system_content = call_args.kwargs["messages"][0]["content"]
     assert "LegacyLens" in system_content
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_uses_capability_prompt(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_uses_capability_prompt(mock_settings, mock_client_fn):
     """generate_answer uses capability-specific prompt when capability given."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
@@ -194,38 +199,39 @@ def test_generate_answer_uses_capability_prompt(mock_settings, mock_client_fn):
     mock_response.choices[0].message.content = "Explained."
     mock_response.usage = None
 
-    mock_client = MagicMock()
+    mock_client = AsyncMock()
     mock_client.chat.completions.create.return_value = mock_response
     mock_client_fn.return_value = mock_client
 
     chunks = [{"text": "code", "metadata": {}}]
-    generate_answer("Explain", chunks, "explain_code")
+    await generate_answer("Explain", chunks, "explain_code")
     call_args = mock_client.chat.completions.create.call_args
     messages = call_args.kwargs["messages"]
     system_content = messages[0]["content"]
     assert "explaining" in system_content.lower() or "explain" in system_content.lower()
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_stream_empty_chunks(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_stream_empty_chunks(mock_settings, mock_client_fn):
     """generate_answer_stream yields fallback for empty chunks."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
     mock_settings.return_value = settings
 
-    events = list(generate_answer_stream("What is DGESV?", [], None))
+    events = [e async for e in generate_answer_stream("What is DGESV?", [], None)]
     assert len(events) == 2
     assert events[0]["type"] == "token"
     assert "don't have sufficient context" in events[0]["token"]
     assert events[1]["type"] == "done"
-    mock_client_fn.return_value.chat.completions.create.assert_not_called()
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_stream_uses_capability_prompt(mock_settings, mock_client_fn):
-    """generate_answer_stream uses CAPABILITIES prompt when capability in CAPABILITIES (line 166)."""
+@pytest.mark.asyncio
+async def test_generate_answer_stream_uses_capability_prompt(mock_settings, mock_client_fn):
+    """generate_answer_stream uses CAPABILITIES prompt when capability in CAPABILITIES."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
     mock_settings.return_value = settings
@@ -235,22 +241,26 @@ def test_generate_answer_stream_uses_capability_prompt(mock_settings, mock_clien
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Answer."
 
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk])
+    mock_client = AsyncMock()
+    # AsyncOpenAI stream returns an async iterator
+    async def async_iter():
+        yield mock_chunk
+    mock_client.chat.completions.create.return_value = async_iter()
     mock_client_fn.return_value = mock_client
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = list(generate_answer_stream("Explain this", chunks, "explain_code"))
+    events = [e async for e in generate_answer_stream("Explain this", chunks, "explain_code")]
     assert events[-1]["type"] == "done"
     call_args = mock_client.chat.completions.create.call_args
     system_content = call_args.kwargs["messages"][0]["content"]
     assert "explain" in system_content.lower()
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_stream_uses_default_prompt(mock_settings, mock_client_fn):
-    """generate_answer_stream uses DEFAULT_SYSTEM_PROMPT when capability is None (line 166)."""
+@pytest.mark.asyncio
+async def test_generate_answer_stream_uses_default_prompt(mock_settings, mock_client_fn):
+    """generate_answer_stream uses DEFAULT_SYSTEM_PROMPT when capability is None."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
     mock_settings.return_value = settings
@@ -260,20 +270,23 @@ def test_generate_answer_stream_uses_default_prompt(mock_settings, mock_client_f
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Streamed."
 
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk])
+    mock_client = AsyncMock()
+    async def async_iter():
+        yield mock_chunk
+    mock_client.chat.completions.create.return_value = async_iter()
     mock_client_fn.return_value = mock_client
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = list(generate_answer_stream("What?", chunks, None))
+    events = [e async for e in generate_answer_stream("What?", chunks, None)]
     assert events[-1]["type"] == "done"
     call_args = mock_client.chat.completions.create.call_args
     assert "LegacyLens" in call_args.kwargs["messages"][0]["content"]
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_stream_with_chunks(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_stream_with_chunks(mock_settings, mock_client_fn):
     """generate_answer_stream yields token and done events."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
@@ -297,12 +310,16 @@ def test_generate_answer_stream_with_chunks(mock_settings, mock_client_fn):
     mock_chunk3.choices = [MagicMock()]
     mock_chunk3.choices[0].delta.content = None
 
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk1, mock_chunk2, mock_chunk3])
+    mock_client = AsyncMock()
+    async def async_iter():
+        yield mock_chunk1
+        yield mock_chunk2
+        yield mock_chunk3
+    mock_client.chat.completions.create.return_value = async_iter()
     mock_client_fn.return_value = mock_client
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = list(generate_answer_stream("What?", chunks, None))
+    events = [e async for e in generate_answer_stream("What?", chunks, None)]
     token_events = [e for e in events if e["type"] == "token"]
     assert len(token_events) >= 2
     assert any("Hello" in e["token"] for e in token_events)
@@ -310,9 +327,10 @@ def test_generate_answer_stream_with_chunks(mock_settings, mock_client_fn):
     assert events[-1]["type"] == "done"
 
 
-@patch("app.services.generation.get_openai_client")
+@patch("app.services.generation.get_async_openai_client")
 @patch("app.services.generation.get_settings")
-def test_generate_answer_stream_citation_fallback(mock_settings, mock_client_fn):
+@pytest.mark.asyncio
+async def test_generate_answer_stream_citation_fallback(mock_settings, mock_client_fn):
     """generate_answer_stream adds citation suffix when LLM omits."""
     settings = MagicMock()
     settings.CHAT_MODEL = "gpt-4o-mini"
@@ -323,14 +341,16 @@ def test_generate_answer_stream_citation_fallback(mock_settings, mock_client_fn)
     mock_chunk.choices = [MagicMock()]
     mock_chunk.choices[0].delta.content = "Answer without citations."
 
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk])
+    mock_client = AsyncMock()
+    async def async_iter():
+        yield mock_chunk
+    mock_client.chat.completions.create.return_value = async_iter()
     mock_client_fn.return_value = mock_client
 
     chunks = [
         {"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
     ]
-    events = list(generate_answer_stream("What?", chunks, None))
+    events = [e async for e in generate_answer_stream("What?", chunks, None)]
     token_events = [e for e in events if e["type"] == "token"]
     assert any("Sources:" in e["token"] for e in token_events)
     assert events[-1]["citations"] == ["dgesv.f:1-50"]

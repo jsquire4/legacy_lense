@@ -433,6 +433,7 @@
         <div class="result" id="result">
             <pre id="answer-raw"></pre>
             <div id="answer-md" class="answer-md" style="display:none"></div>
+            <div class="obs-stats" id="obs-timing-tokens" style="margin-bottom:1rem"></div>
             <div class="citations" id="citations-box">
                 <h3>Sources</h3>
                 <div id="citations"></div>
@@ -445,7 +446,6 @@
             <h2 class="panel-title">Observability</h2>
             <div id="obs-empty" class="obs-empty">Run a query to see details</div>
             <div class="obs-panel" id="obs-content" style="display:none">
-                <div class="obs-stats" id="obs-timing-tokens"></div>
                 <div id="obs-expansion-section" style="display:none;">
                     <h4>Query Expansion</h4>
                     <div class="expansion-names" id="obs-expansion"></div>
@@ -702,7 +702,7 @@
             const tokens = [
                 ["Prompt", tok.prompt_tokens], ["Completion", tok.completion_tokens], ["Total Tok", tok.total_tokens],
             ].map(([l, v]) => `<div class="stat"><span class="stat-value">${v != null ? v.toLocaleString() : '—'}</span><span>${l}</span></div>`).join("");
-            document.getElementById("obs-timing-tokens").innerHTML = timing + tokens;
+            document.getElementById("obs-timing-tokens").innerHTML = `<h3 style="margin:0 0 0.5rem;color:#888;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em">Performance</h3>` + timing + tokens;
         }
         function updateTiming(timing) { _lastTiming = timing; _renderTimingTokens(); }
         function updateTokens(tok) { _lastTokens = tok; _renderTimingTokens(); }

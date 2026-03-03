@@ -196,6 +196,21 @@ def check_e2e_result(answer: str, citations: list[str], checks: dict) -> dict:
     results = {}
     answer_lower = answer.lower()
 
+    # Detect refusal / cop-out answers
+    _REFUSAL_PHRASES = [
+        "insufficient context",
+        "i don't know",
+        "i do not know",
+        "i cannot answer",
+        "i can't answer",
+        "no relevant context",
+        "no lapack source",
+        "not enough context",
+        "cannot determine",
+        "don't have sufficient context",
+    ]
+    results["not_refusal"] = not any(p in answer_lower for p in _REFUSAL_PHRASES)
+
     if checks.get("has_citations"):
         results["has_citations"] = len(citations) > 0
 

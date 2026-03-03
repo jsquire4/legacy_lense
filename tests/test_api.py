@@ -577,3 +577,25 @@ def test_eval_stream_with_model_param(mock_retrieve):
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     assert any(e["event"] == "summary" for e in events)
+
+
+@patch("app.main._build_response", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_warm_cache_success(mock_build):
+    """_warm_cache calls _build_response for each warmup query * model."""
+    mock_build.return_value = MagicMock()
+
+    from app.main import _warm_cache, _WARMUP_QUERIES, _WARMUP_MODELS
+    await _warm_cache()
+    assert mock_build.call_count == len(_WARMUP_QUERIES) * len(_WARMUP_MODELS)
+
+
+@patch("app.main._build_response", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_warm_cache_handles_errors(mock_build):
+    """_warm_cache continues when a query fails."""
+    mock_build.side_effect = Exception("API down")
+
+    from app.main import _warm_cache, _WARMUP_QUERIES, _WARMUP_MODELS
+    await _warm_cache()  # should not raise
+    assert mock_build.call_count == len(_WARMUP_QUERIES) * len(_WARMUP_MODELS)

@@ -20,8 +20,10 @@ services:
       - ./app:/app/app
       - ./scripts:/app/scripts
       - ./logs:/app/logs
+      - app_data:/app/data
     depends_on:
       - qdrant
 
 volumes:
   qdrant_data:
+  app_data:

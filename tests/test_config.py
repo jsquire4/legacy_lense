@@ -19,6 +19,6 @@ def test_get_settings_returns_settings_instance(monkeypatch):
         assert settings.QDRANT_URL == "http://localhost:6333"
         assert settings.QDRANT_COLLECTION_NAME == "lapack"
         assert settings.EMBEDDING_MODEL == "text-embedding-3-small"
-        assert settings.CHAT_MODEL == "gpt-4o-mini"
+        assert settings.CHAT_MODEL == "gpt-4.1-nano"
     finally:
         get_settings.cache_clear()

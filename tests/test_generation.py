@@ -697,3 +697,86 @@ async def test_generate_answer_stream_citation_fallback_no_file_path(mock_settin
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
     token_events = [e for e in events if e["type"] == "token"]
     assert not any("Sources:" in e["token"] for e in token_events)
+
+
+@patch("app.services.generation._get_generation_client")
+@patch("app.services.generation.get_settings")
+@pytest.mark.asyncio
+async def test_generate_answer_reasoning_model_uses_reasoning_effort(mock_settings, mock_client_fn):
+    """generate_answer passes reasoning_effort instead of temperature for gpt-5 models."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-5-nano"
+    mock_settings.return_value = settings
+
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message.content = "Answer."
+    mock_response.usage = None
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create.return_value = mock_response
+    mock_client_fn.return_value = mock_client
+
+    chunks = [{"text": "code", "metadata": {}}]
+    await generate_answer("What?", chunks, None)
+    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "low"
+    assert "temperature" not in call_kwargs
+
+
+@patch("app.services.generation._get_generation_client")
+@patch("app.services.generation.get_settings")
+@pytest.mark.asyncio
+async def test_generate_answer_track_ttft_reasoning_model(mock_settings, mock_client_fn):
+    """_generate_with_ttft passes reasoning_effort for gpt-5 models."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-5-mini"
+    mock_settings.return_value = settings
+
+    mock_chunk = MagicMock()
+    mock_chunk.usage = MagicMock()
+    mock_chunk.usage.prompt_tokens = 50
+    mock_chunk.usage.completion_tokens = 10
+    mock_chunk.usage.total_tokens = 60
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Answer"
+
+    mock_client = AsyncMock()
+    async def async_iter():
+        yield mock_chunk
+    mock_client.chat.completions.create.return_value = async_iter()
+    mock_client_fn.return_value = mock_client
+
+    chunks = [{"text": "code", "metadata": {}}]
+    await generate_answer("What?", chunks, None, track_ttft=True)
+    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "low"
+    assert "temperature" not in call_kwargs
+
+
+@patch("app.services.generation._get_generation_client")
+@patch("app.services.generation.get_settings")
+@pytest.mark.asyncio
+async def test_generate_answer_stream_reasoning_model(mock_settings, mock_client_fn):
+    """generate_answer_stream passes reasoning_effort for gpt-5 models."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-5.2"
+    mock_settings.return_value = settings
+
+    mock_chunk = MagicMock()
+    mock_chunk.usage = None
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "Answer."
+
+    mock_client = AsyncMock()
+    async def async_iter():
+        yield mock_chunk
+    mock_client.chat.completions.create.return_value = async_iter()
+    mock_client_fn.return_value = mock_client
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None)]
+    assert events[-1]["type"] == "done"
+    call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+    assert call_kwargs["reasoning_effort"] == "low"
+    assert "temperature" not in call_kwargs

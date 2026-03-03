@@ -11,6 +11,7 @@ from functools import lru_cache
 from openai import AsyncOpenAI
 
 from app.config import get_settings
+from app.models_data import is_reasoning_model
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ async def generate_answer(
     query: str,
     chunks: list[dict],
     capability: str | None = None,
-    max_tokens: int = 1500,
+    max_completion_tokens: int = 2048,
     context_budget: int = CONTEXT_TOKEN_BUDGET,
     track_ttft: bool = False,
     model: str | None = None,
@@ -147,15 +148,19 @@ async def generate_answer(
 
     if track_ttft:
         answer_text, token_usage, ttft_ms = await _generate_with_ttft(
-            client, resolved_model, messages, max_tokens,
+            client, resolved_model, messages, max_completion_tokens,
         )
     else:
-        response = await client.chat.completions.create(
+        kwargs = dict(
             model=resolved_model,
             messages=messages,
-            temperature=0.1,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_completion_tokens,
         )
+        if is_reasoning_model(resolved_model):
+            kwargs["reasoning_effort"] = "low"
+        else:
+            kwargs["temperature"] = 0.1
+        response = await client.chat.completions.create(**kwargs)
 
         answer_text = ""
         if len(response.choices) > 0:
@@ -191,19 +196,23 @@ async def generate_answer(
     return result
 
 
-async def _generate_with_ttft(client, model, messages, max_tokens):
+async def _generate_with_ttft(client, model, messages, max_completion_tokens):
     """Stream a completion and measure time-to-first-token."""
     import time
 
     t0 = time.time()
-    stream = await client.chat.completions.create(
+    kwargs = dict(
         model=model,
         messages=messages,
-        temperature=0.1,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_completion_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )
+    if is_reasoning_model(model):
+        kwargs["reasoning_effort"] = "low"
+    else:
+        kwargs["temperature"] = 0.1
+    stream = await client.chat.completions.create(**kwargs)
 
     accumulated = []
     token_usage = {}
@@ -230,7 +239,7 @@ async def generate_answer_stream(
     query: str,
     chunks: list[dict],
     capability: str | None = None,
-    max_tokens: int = 1500,
+    max_completion_tokens: int = 2048,
     context_budget: int = CONTEXT_TOKEN_BUDGET,
     model: str | None = None,
 ):
@@ -254,14 +263,18 @@ async def generate_answer_stream(
 
     messages = _build_messages(query, chunks, capability, context_budget)
 
-    stream = await client.chat.completions.create(
+    kwargs = dict(
         model=resolved_model,
         messages=messages,
-        temperature=0.1,
-        max_tokens=max_tokens,
+        max_completion_tokens=max_completion_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )
+    if is_reasoning_model(resolved_model):
+        kwargs["reasoning_effort"] = "low"
+    else:
+        kwargs["temperature"] = 0.1
+    stream = await client.chat.completions.create(**kwargs)
 
     accumulated = []
     token_usage = {}

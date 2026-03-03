@@ -53,10 +53,36 @@ def _cache_put(key: str, resp):
         _RESPONSE_CACHE.popitem(last=False)
 
 
+_WARMUP_QUERIES = [
+    ("What does the DGESV subroutine do?", None),
+    ("Explain the DGETRF factorization routine", "explain_code"),
+    ("Generate documentation for ZGEMM", "generate_docs"),
+    ("What patterns are used in the BLAS routines?", "detect_patterns"),
+    ("What does DGESV call internally?", "map_dependencies"),
+    ("What breaks if DTRSM changes its interface?", "impact_analysis"),
+    ("What numerical checks does DGESVD enforce?", "extract_business_rules"),
+]
+
+
+_WARMUP_MODELS = ["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano"]
+
+
+async def _warm_cache():
+    """Pre-cache responses for the default example queries across cheap models."""
+    for model in _WARMUP_MODELS:
+        for query, capability in _WARMUP_QUERIES:
+            try:
+                await _build_response(query, 5, capability, model)
+                logger.info("Cache warmed [%s]: %.60s", model, query)
+            except Exception as e:
+                logger.warning("Cache warmup failed [%s] '%.60s': %s", model, query, e)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("LegacyLens started")
+    asyncio.create_task(_warm_cache())
     yield
 
 
@@ -344,8 +370,8 @@ async def _eval_stream_generator(model: str | None = None):
     })
 
 
-_E2E_MAX_TOKENS = 150
-_E2E_CONTEXT_BUDGET = 1000
+_E2E_MAX_TOKENS = 2048
+_E2E_CONTEXT_BUDGET = 3000
 
 
 async def _e2e_eval_stream_generator(model: str | None = None):
@@ -377,7 +403,7 @@ async def _e2e_eval_stream_generator(model: str | None = None):
         t0 = time.time()
         gen_result = await generate_answer(
             query, chunks, capability,
-            max_tokens=_E2E_MAX_TOKENS,
+            max_completion_tokens=_E2E_MAX_TOKENS,
             context_budget=_E2E_CONTEXT_BUDGET,
             model=model,
         )

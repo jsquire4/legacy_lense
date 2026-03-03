@@ -291,43 +291,55 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
 
 # --- Eval endpoints (async — uses same fast pipeline as query endpoints) ---
 
+_EVAL_BATCH_SIZE = 5
+
+
+async def _run_retrieval_eval(i: int, item: dict) -> dict:
+    """Run a single retrieval eval and return the result dict."""
+    query = item["query"]
+    expected = item["expected_files"]
+
+    t0 = time.time()
+    result = await retrieve(query, top_k=5)
+    latency_ms = round((time.time() - t0) * 1000, 1)
+
+    retrieved_files = []
+    seen = set()
+    for chunk in result["chunks"]:
+        fp = chunk.get("metadata", {}).get("file_path", "")
+        if fp:
+            fname = Path(fp).name
+            if fname not in seen:
+                retrieved_files.append(fname)
+                seen.add(fname)
+
+    recall = compute_recall_at_k(retrieved_files, expected, k=5)
+    return {
+        "index": i,
+        "query": query,
+        "capability": item.get("capability"),
+        "recall_at_5": round(recall, 4),
+        "latency_ms": latency_ms,
+        "retrieved_files": retrieved_files[:5],
+        "expected_files": expected,
+    }
+
+
 async def _eval_stream_generator():
-    """Async generator yielding SSE events for each retrieval eval query."""
+    """Async generator — runs retrieval evals in concurrent batches."""
     total_recall = 0.0
     total_latency = 0.0
     n = len(EVAL_QUERIES)
 
-    for i, item in enumerate(EVAL_QUERIES):
-        query = item["query"]
-        expected = item["expected_files"]
-
-        t0 = time.time()
-        result = await retrieve(query, top_k=5)
-        latency_ms = round((time.time() - t0) * 1000, 1)
-
-        retrieved_files = []
-        seen = set()
-        for chunk in result["chunks"]:
-            fp = chunk.get("metadata", {}).get("file_path", "")
-            if fp:
-                fname = Path(fp).name
-                if fname not in seen:
-                    retrieved_files.append(fname)
-                    seen.add(fname)
-
-        recall = compute_recall_at_k(retrieved_files, expected, k=5)
-        total_recall += recall
-        total_latency += latency_ms
-
-        yield _sse_event("progress", {
-            "index": i,
-            "query": query,
-            "capability": item.get("capability"),
-            "recall_at_5": round(recall, 4),
-            "latency_ms": latency_ms,
-            "retrieved_files": retrieved_files[:5],
-            "expected_files": expected,
-        })
+    for batch_start in range(0, n, _EVAL_BATCH_SIZE):
+        batch = list(enumerate(EVAL_QUERIES))[batch_start:batch_start + _EVAL_BATCH_SIZE]
+        results = await asyncio.gather(*[
+            _run_retrieval_eval(i, item) for i, item in batch
+        ])
+        for r in sorted(results, key=lambda x: x["index"]):
+            total_recall += r["recall_at_5"]
+            total_latency += r["latency_ms"]
+            yield _sse_event("progress", r)
 
     yield _sse_event("summary", {
         "avg_recall_at_5": round(total_recall / n, 4),
@@ -336,42 +348,51 @@ async def _eval_stream_generator():
     })
 
 
+async def _run_e2e_eval(i: int, item: dict) -> dict:
+    """Run a single e2e eval and return the result dict."""
+    query = item["query"]
+    capability = item.get("capability")
+    checks = item["checks"]
+
+    t0 = time.time()
+    retrieval_result = await retrieve(query, top_k=8)
+    chunks = retrieval_result["chunks"]
+    gen_result = await generate_answer(query, chunks, capability)
+    latency_ms = round((time.time() - t0) * 1000, 1)
+
+    check_results = check_e2e_result(
+        gen_result["answer"], gen_result["citations"], checks,
+    )
+
+    return {
+        "index": i,
+        "query": query,
+        "capability": capability,
+        "passed": check_results["pass"],
+        "checks": check_results,
+        "latency_ms": latency_ms,
+        "citations": gen_result["citations"],
+        "answer_preview": gen_result["answer"][:500],
+        "answer_length": len(gen_result["answer"]),
+    }
+
+
 async def _e2e_eval_stream_generator():
-    """Async generator yielding SSE events for e2e generation evals."""
+    """Async generator — runs e2e evals in concurrent batches."""
     n = len(E2E_EVAL_QUERIES)
     total_passed = 0
     total_latency = 0.0
 
-    for i, item in enumerate(E2E_EVAL_QUERIES):
-        query = item["query"]
-        capability = item.get("capability")
-        checks = item["checks"]
-
-        t0 = time.time()
-        retrieval_result = await retrieve(query, top_k=8)
-        chunks = retrieval_result["chunks"]
-        gen_result = await generate_answer(query, chunks, capability)
-        latency_ms = round((time.time() - t0) * 1000, 1)
-
-        check_results = check_e2e_result(
-            gen_result["answer"], gen_result["citations"], checks,
-        )
-
-        if check_results["pass"]:
-            total_passed += 1
-        total_latency += latency_ms
-
-        yield _sse_event("progress", {
-            "index": i,
-            "query": query,
-            "capability": capability,
-            "passed": check_results["pass"],
-            "checks": check_results,
-            "latency_ms": latency_ms,
-            "citations": gen_result["citations"],
-            "answer_preview": gen_result["answer"][:500],
-            "answer_length": len(gen_result["answer"]),
-        })
+    for batch_start in range(0, n, _EVAL_BATCH_SIZE):
+        batch = list(enumerate(E2E_EVAL_QUERIES))[batch_start:batch_start + _EVAL_BATCH_SIZE]
+        results = await asyncio.gather(*[
+            _run_e2e_eval(i, item) for i, item in batch
+        ])
+        for r in sorted(results, key=lambda x: x["index"]):
+            if r["passed"]:
+                total_passed += 1
+            total_latency += r["latency_ms"]
+            yield _sse_event("progress", r)
 
     yield _sse_event("summary", {
         "total_queries": n,

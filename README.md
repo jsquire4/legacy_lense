@@ -5,7 +5,7 @@ A RAG application for querying the LAPACK Fortran codebase via natural language.
 ## Features
 
 - **Hybrid retrieval**: name matching, LLM query expansion, call-graph following, and vector similarity
-- **4 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping
+- **5 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping, impact analysis
 - **Citation enforcement**: every answer includes file:line references
 - **Observability**: per-query timing, token usage, chunk scores, and retrieval strategy details
 - **Structured logging**: rotating JSON log files in `logs/`
@@ -72,9 +72,13 @@ General-purpose query.
 Response includes `answer`, `citations`, `latency_ms`, `retrieval_details`, `token_usage`, and `timing`.
 
 ### `POST /api/capabilities/{capability}`
-Specialized query. Capabilities: `explain_code`, `generate_docs`, `detect_patterns`, `map_dependencies`.
+Specialized query. Capabilities: `explain_code`, `generate_docs`, `detect_patterns`, `map_dependencies`, `impact_analysis`.
 
 Same request/response format as `/api/query`.
+
+### Streaming Endpoints
+
+`POST /api/query/stream` and `POST /api/capabilities/{capability}/stream` return SSE streams with `retrieval`, `token`, and `done` events for real-time UI rendering.
 
 ## Architecture
 
@@ -96,13 +100,16 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 python scripts/evaluate.py
 ```
 
-Results (15 queries):
-- **Recall@5**: 0.96 (target: >0.70)
-- **Avg latency**: <3s (target: <3s)
+Results (37 queries):
+- **Recall@5**: >0.90 (target: >0.70)
+- **Avg retrieval**: <500ms
+- **Avg end-to-end**: <3s (target: <3s)
 
 ## Deployment
 
-Deployed on Railway with auto-deploy on push. Qdrant Cloud provides the vector database (free tier, 1 GB).
+Deployed on Railway with auto-deploy on push. Qdrant runs as a co-located Railway service for minimal retrieval latency.
+
+**Live**: https://legacylense-production.up.railway.app
 
 Environment variables required:
 - `OPENAI_API_KEY`
@@ -113,7 +120,7 @@ Environment variables required:
 
 - **Ingestion**: ~$0.09 one-time (4.7M tokens embedded)
 - **Per query**: ~$0.0016 (gpt-4o-mini)
-- **Infrastructure**: $5/mo Railway + free Qdrant Cloud
+- **Infrastructure**: $5/mo Railway (app + Qdrant)
 
 See [docs/cost_analysis.md](docs/cost_analysis.md) for scaling projections.
 
@@ -124,6 +131,6 @@ See [docs/cost_analysis.md](docs/cost_analysis.md) for scaling projections.
 | Backend | Python 3.12, FastAPI |
 | Embeddings | OpenAI text-embedding-3-small (1536-dim) |
 | LLM | gpt-4o-mini |
-| Vector DB | Qdrant Cloud |
+| Vector DB | Qdrant (Railway, internal network) |
 | Parser | fparser (AST-based Fortran parsing) |
 | Deployment | Railway + Docker |

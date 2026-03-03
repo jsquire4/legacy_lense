@@ -102,20 +102,45 @@ async def test_retrieve_name_match(mock_embed, mock_search_by_name, mock_search)
 @patch("app.services.retrieval.async_search", new_callable=AsyncMock)
 @patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
 @patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@patch("app.services.retrieval._expand_query", new_callable=AsyncMock)
 @pytest.mark.asyncio
-async def test_retrieve_conceptual_uses_vector(mock_embed, mock_search_by_name, mock_search):
-    """retrieve uses vector search for conceptual queries (no expansion)."""
+async def test_retrieve_conceptual_uses_expansion(mock_expand, mock_embed, mock_search_by_name, mock_search):
+    """retrieve uses LLM expansion for conceptual queries without routine names."""
     mock_embed.return_value = [0.1] * 1536
+    mock_expand.return_value = ["DGETRF", "DGESV"]
+    mock_search_by_name.return_value = [
+        {"id": "e1", "score": 0.9, "text": "t", "metadata": {"unit_name": "DGETRF"}},
+    ]
+    mock_search.return_value = [
+        {"id": "v1", "score": 0.8, "text": "t", "metadata": {}},
+    ]
+
+    result = await retrieve("How does LU decomposition work?", top_k=5)
+    assert result["retrieval_strategy"] == "expansion"
+    assert result["expanded_names"] == ["DGETRF", "DGESV"]
+    assert any(c.get("_match_type") == "expansion" for c in result["chunks"])
+    mock_expand.assert_called_once()
+    mock_search_by_name.assert_called()
+
+
+@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
+@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
+@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@patch("app.services.retrieval._expand_query", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_retrieve_conceptual_falls_back_to_vector(mock_expand, mock_embed, mock_search_by_name, mock_search):
+    """retrieve falls back to vector-only when expansion returns no names."""
+    mock_embed.return_value = [0.1] * 1536
+    mock_expand.return_value = []
     mock_search_by_name.return_value = []
     mock_search.return_value = [
         {"id": "v1", "score": 0.9, "text": "t", "metadata": {}},
     ]
 
-    result = await retrieve("How does LU decomposition work?", top_k=5)
+    result = await retrieve("How does matrix math work?", top_k=5)
     assert result["retrieval_strategy"] == "vector"
     assert result["expanded_names"] == []
     assert len(result["chunks"]) >= 1
-    mock_search.assert_called()
 
 
 @patch("app.services.retrieval.async_search", new_callable=AsyncMock)

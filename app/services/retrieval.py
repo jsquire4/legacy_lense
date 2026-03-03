@@ -103,8 +103,18 @@ async def retrieve(query: str, top_k: int = 5) -> dict:
                 name_results.append(h)
                 seen_ids.add(h["id"])
     else:
-        # Conceptual query — vector search only (no LLM expansion call)
-        pass
+        # Conceptual query — LLM expansion to find relevant routine names
+        expanded_names = await _expand_query(query)
+        if expanded_names:
+            strategy = "expansion"
+            expansion_hits = await _fan_out_name_search(
+                query_embedding, expanded_names, top_k_each=2,
+            )
+            for h in expansion_hits:
+                if h["id"] not in seen_ids:
+                    h["_match_type"] = "expansion"
+                    name_results.append(h)
+                    seen_ids.add(h["id"])
 
     # Follow call graph one hop: find routines called by name-matched results
     call_graph_results = []

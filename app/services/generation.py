@@ -7,7 +7,7 @@ from pathlib import Path
 import tiktoken
 
 from app.config import get_settings
-from app.services.embeddings import get_async_openai_client, get_openai_client
+from app.services.embeddings import get_async_openai_client
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -205,60 +205,3 @@ async def generate_answer_stream(
             yield {"type": "token", "token": suffix}
 
     yield {"type": "done", "citations": citations, "token_usage": token_usage}
-
-
-# --- Sync version (used by eval generators) ---
-
-def generate_answer_sync(
-    query: str,
-    chunks: list[dict],
-    capability: str | None = None,
-) -> dict:
-    """Sync generate_answer for eval generators."""
-    settings = get_settings()
-    client = get_openai_client()
-
-    if not chunks:
-        return {
-            "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
-            "citations": [],
-            "model": settings.CHAT_MODEL,
-            "token_usage": {},
-        }
-
-    messages = _build_messages(query, chunks, capability)
-
-    response = client.chat.completions.create(
-        model=settings.CHAT_MODEL,
-        messages=messages,
-        temperature=0.1,
-        max_tokens=800,
-    )
-
-    answer_text = ""
-    if len(response.choices) > 0:
-        message = response.choices[0].message
-        if message.content is not None:
-            answer_text = message.content
-
-    citations = _extract_citations_from_text(answer_text)
-
-    if not citations:
-        citations = _build_citation_fallback(chunks[:5])
-        if citations:
-            answer_text += "\n\nSources: " + ", ".join(citations)
-
-    token_usage = {}
-    if response.usage is not None:
-        token_usage = {
-            "prompt_tokens": response.usage.prompt_tokens,
-            "completion_tokens": response.usage.completion_tokens,
-            "total_tokens": response.usage.total_tokens,
-        }
-
-    return {
-        "answer": answer_text,
-        "citations": citations,
-        "model": settings.CHAT_MODEL,
-        "token_usage": token_usage,
-    }

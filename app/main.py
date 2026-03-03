@@ -15,9 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.services.retrieval import retrieve
-from app.services.generation import generate_answer, generate_answer_stream, generate_answer_sync
-from app.services.vector_store import search, search_by_name
-from app.services.embeddings import embed_texts
+from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.logging_config import setup_logging
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
@@ -291,34 +289,10 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
     )
 
 
-# --- Eval endpoints (sync — not latency-critical) ---
+# --- Eval endpoints (async — uses same fast pipeline as query endpoints) ---
 
-def _sync_retrieve(query: str, top_k: int = 5) -> dict:
-    """Sync retrieval for eval generators using sync clients."""
-    from app.services.embeddings import embed_texts
-    from app.services.vector_store import search, search_by_name
-    import re
-
-    embeddings = embed_texts([query])
-    if not embeddings:
-        return {"chunks": [], "expanded_names": [], "retrieval_strategy": "failed"}
-
-    query_embedding = embeddings[0]
-
-    # Simple vector search for evals
-    vector_results = search(query_embedding, top_k=top_k)
-    for r in vector_results:
-        r.setdefault("_match_type", "vector")
-
-    return {
-        "chunks": vector_results,
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-
-
-def _eval_stream_generator():
-    """Generator yielding SSE events for each retrieval eval query: progress*, summary."""
+async def _eval_stream_generator():
+    """Async generator yielding SSE events for each retrieval eval query."""
     total_recall = 0.0
     total_latency = 0.0
     n = len(EVAL_QUERIES)
@@ -328,7 +302,7 @@ def _eval_stream_generator():
         expected = item["expected_files"]
 
         t0 = time.time()
-        result = _sync_retrieve(query, top_k=5)
+        result = await retrieve(query, top_k=5)
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         retrieved_files = []
@@ -362,8 +336,8 @@ def _eval_stream_generator():
     })
 
 
-def _e2e_eval_stream_generator():
-    """Generator yielding SSE events for e2e generation evals: progress*, summary."""
+async def _e2e_eval_stream_generator():
+    """Async generator yielding SSE events for e2e generation evals."""
     n = len(E2E_EVAL_QUERIES)
     total_passed = 0
     total_latency = 0.0
@@ -374,9 +348,9 @@ def _e2e_eval_stream_generator():
         checks = item["checks"]
 
         t0 = time.time()
-        retrieval_result = _sync_retrieve(query, top_k=8)
+        retrieval_result = await retrieve(query, top_k=8)
         chunks = retrieval_result["chunks"]
-        gen_result = generate_answer_sync(query, chunks, capability)
+        gen_result = await generate_answer(query, chunks, capability)
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         check_results = check_e2e_result(
@@ -410,16 +384,16 @@ def _e2e_eval_stream_generator():
 
 @app.get("/api/eval/stream")
 async def eval_stream_endpoint():
-    def gen():
-        yield from _eval_stream_generator()
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        _eval_stream_generator(), media_type="text/event-stream",
+    )
 
 
 @app.get("/api/eval/e2e/stream")
 async def e2e_eval_stream_endpoint():
-    def gen():
-        yield from _e2e_eval_stream_generator()
-    return StreamingResponse(gen(), media_type="text/event-stream")
+    return StreamingResponse(
+        _e2e_eval_stream_generator(), media_type="text/event-stream",
+    )
 
 
 @app.get("/")

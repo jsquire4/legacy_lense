@@ -177,7 +177,7 @@ def test_capability_stream_endpoint(mock_retrieve, mock_stream):
     assert events[-1]["event"] == "done"
 
 
-@patch("app.main._sync_retrieve")
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_eval_stream_returns_sse(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -193,7 +193,7 @@ def test_eval_stream_returns_sse(mock_retrieve):
     assert response.headers["content-type"].startswith("text/event-stream")
 
 
-@patch("app.main._sync_retrieve")
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_eval_stream_emits_progress_events(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -220,7 +220,7 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     assert first["index"] == 0
 
 
-@patch("app.main._sync_retrieve")
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_eval_stream_summary_is_last_event(mock_retrieve):
     mock_retrieve.return_value = {
         "chunks": [
@@ -242,8 +242,8 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     assert 0.0 <= summary["avg_recall_at_5"] <= 1.0
 
 
-@patch("app.main.generate_answer_sync")
-@patch("app.main._sync_retrieve")
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
 def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     mock_retrieve.return_value = {
         "chunks": [

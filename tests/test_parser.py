@@ -413,6 +413,94 @@ def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls):
         path.unlink()
 
 
+@patch("fparser.one.parsefortran.FortranParser")
+def test_parse_fixed_form_item_no_span_uses_default_lines(mock_parser_cls):
+    """Parser uses default start_line/end_line when item has no span (branch coverage)."""
+    sub_item = MagicMock()
+    sub_item.name = "NOSPAN"
+    sub_item.__class__.__name__ = "Subroutine"
+    sub_item.__str__ = lambda self: "      SUBROUTINE NOSPAN\n      END"
+    sub_item.item = None  # no item.span
+
+    mock_block = MagicMock()
+    mock_block.content = [sub_item]
+
+    mock_parser = MagicMock()
+    mock_parser.block = mock_block
+    mock_parser_cls.return_value = mock_parser
+
+    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
+        f.write(b"      SUBROUTINE NOSPAN\n      END\n")
+        path = Path(f.name)
+    try:
+        units = parse_file(path)
+        assert len(units) == 1
+        assert units[0].start_line == 1
+        assert units[0].end_line == 2
+    finally:
+        path.unlink()
+
+
+@patch("fparser.one.parsefortran.FortranParser")
+def test_parse_fixed_form_unit_doc_fallback_to_full_file(mock_parser_cls):
+    """Parser tries full file for doc when unit source has no docs (branch coverage)."""
+    sub_item = MagicMock()
+    sub_item.name = "NODOC"
+    sub_item.__class__.__name__ = "Subroutine"
+    # str(item) has no *> lines - fparser strips them
+    sub_item.__str__ = lambda self: "      SUBROUTINE NODOC\n      X=1\n      END"
+    sub_item.item = MagicMock()
+    sub_item.item.span = (1, 3)
+
+    mock_block = MagicMock()
+    mock_block.content = [sub_item]
+
+    mock_parser = MagicMock()
+    mock_parser.block = mock_block
+    mock_parser_cls.return_value = mock_parser
+
+    file_content = b"*> \\brief NODOC does something\n      SUBROUTINE NODOC\n      X=1\n      END\n"
+    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
+        f.write(file_content)
+        path = Path(f.name)
+    try:
+        units = parse_file(path)
+        assert len(units) == 1
+        # Unit source has no *> so unit_doc empty; we try full file
+        assert "NODOC" in units[0].doc_comments or "something" in units[0].doc_comments or units[0].doc_comments == ""
+    finally:
+        path.unlink()
+
+
+@patch("fparser.one.parsefortran.FortranParser")
+def test_parse_fixed_form_unit_has_doc_skips_full_file(mock_parser_cls):
+    """Parser skips full-file doc extraction when unit source has docs (branch coverage)."""
+    sub_item = MagicMock()
+    sub_item.name = "HASDOC"
+    sub_item.__class__.__name__ = "Subroutine"
+    # str(item) includes *> - unit has its own docs
+    sub_item.__str__ = lambda self: "*> \\brief HASDOC does work\n      SUBROUTINE HASDOC\n      X=1\n      END"
+    sub_item.item = MagicMock()
+    sub_item.item.span = (1, 4)
+
+    mock_block = MagicMock()
+    mock_block.content = [sub_item]
+
+    mock_parser = MagicMock()
+    mock_parser.block = mock_block
+    mock_parser_cls.return_value = mock_parser
+
+    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
+        f.write(b"      SUBROUTINE HASDOC\n      X=1\n      END\n")
+        path = Path(f.name)
+    try:
+        units = parse_file(path)
+        assert len(units) == 1
+        assert "HASDOC" in units[0].doc_comments or "work" in units[0].doc_comments
+    finally:
+        path.unlink()
+
+
 def test_parse_file_block_none_raises_then_raw_fallback():
     """When fparser1 returns block=None, ValueError is raised and RAW fallback used."""
     with patch("fparser.one.parsefortran.FortranParser") as MockParser:

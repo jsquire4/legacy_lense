@@ -125,11 +125,8 @@ async def retrieve(query: str, top_k: int = 5) -> dict:
                 call_graph_results.append(h)
                 seen_ids.add(h["id"])
 
-    # Vector search (already done for conceptual queries, run now for name-match)
-    if routine_name or not expanded_names:
-        vector_results = await async_search(query_embedding, top_k=top_k)
-    else:
-        vector_results = early_vector_results  # noqa: F821 — set in else branch above
+    # Vector search (conceptual queries use vector only; name-match adds vector results)
+    vector_results = await async_search(query_embedding, top_k=top_k)
 
     # Merge: name-matched first, then call-graph, then vector (deduplicated)
     merged = list(name_results) + call_graph_results

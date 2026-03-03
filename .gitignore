@@ -11,6 +11,8 @@
 __pycache__/
 *.pyc
 *.pyo
+.coverage
+*.cover
 venv/
 .venv/
 *.egg-info/
@@ -22,3 +24,4 @@ data/
 logs/
 PLAN.md
 .gitnexus
+Gauntlet_Docs/writeup.md

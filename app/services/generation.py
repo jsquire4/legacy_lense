@@ -272,9 +272,10 @@ async def generate_answer_stream(
 
         if chunk.choices:
             delta = chunk.choices[0].delta
-            if delta.content:
-                accumulated.append(delta.content)
-                yield {"type": "token", "token": delta.content}
+            content = delta.content
+            if content:
+                accumulated.append(content)
+                yield {"type": "token", "token": content}
 
     full_text = "".join(accumulated)
     citations = _extract_citations_from_text(full_text)

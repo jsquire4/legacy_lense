@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.retrieval import _extract_routine_name, retrieve
+from app.services.retrieval import _extract_routine_name, _expand_query, retrieve
 
 
 def test_extract_routine_name_found():
@@ -24,6 +24,44 @@ def test_extract_routine_name_sdczi_prefix():
     """_extract_routine_name only matches S/D/C/Z/I prefix."""
     assert _extract_routine_name("What is DGESV?") == "DGESV"
     assert _extract_routine_name("What is ZGEMM?") == "ZGEMM"
+
+
+@patch("app.services.retrieval.get_async_openai_client")
+@patch("app.services.retrieval.get_settings")
+@pytest.mark.asyncio
+async def test_expand_query_success(mock_settings, mock_client_fn):
+    """_expand_query returns LAPACK names from LLM response."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    mock_msg = MagicMock()
+    mock_msg.content = "DGESV DGETRF DGETRS DGESVX"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message = mock_msg
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    mock_client_fn.return_value = mock_client
+
+    result = await _expand_query("How does LU decomposition work?")
+    assert "DGESV" in result
+    assert "DGETRF" in result
+    mock_client.chat.completions.create.assert_called_once()
+
+
+@patch("app.services.retrieval.get_async_openai_client")
+@patch("app.services.retrieval.get_settings")
+@pytest.mark.asyncio
+async def test_expand_query_exception_returns_empty(mock_settings, mock_client_fn):
+    """_expand_query returns [] on exception."""
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
+    mock_client_fn.return_value = mock_client
+
+    result = await _expand_query("How does SVD work?")
+    assert result == []
 
 
 @patch("app.services.retrieval.async_search", new_callable=AsyncMock)
@@ -83,26 +121,6 @@ async def test_retrieve_conceptual_uses_vector(mock_embed, mock_search_by_name, 
 @patch("app.services.retrieval.async_search", new_callable=AsyncMock)
 @patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
 @patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
-@patch("app.services.retrieval.get_async_openai_client")
-@pytest.mark.asyncio
-async def test_retrieve_expansion_exception_returns_empty(mock_client_fn, mock_embed, mock_search_by_name, mock_search):
-    """_expand_query returns [] on exception, retrieval continues with vector."""
-    mock_embed.return_value = [0.1] * 1536
-    mock_client_fn.return_value = AsyncMock()
-    mock_client_fn.return_value.chat.completions.create.side_effect = Exception("API error")
-    mock_search_by_name.return_value = []
-    mock_search.return_value = [
-        {"id": "v1", "score": 0.8, "text": "t", "metadata": {}},
-    ]
-
-    result = await retrieve("How does LU work?", top_k=5)
-    assert result["retrieval_strategy"] == "vector"
-    assert len(result["chunks"]) >= 1
-
-
-@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
-@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
-@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
 @pytest.mark.asyncio
 async def test_retrieve_call_graph_follow(mock_embed, mock_search_by_name, mock_search):
     """retrieve follows call graph from name-matched results."""
@@ -145,3 +163,63 @@ async def test_retrieve_vector_merge_dedup(mock_expand, mock_embed, mock_search_
     assert len(result["chunks"]) == 2
     ids = [c["id"] for c in result["chunks"]]
     assert len(ids) == len(set(ids))
+
+
+@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
+@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
+@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_retrieve_name_match_skips_duplicate_ids(mock_embed, mock_search_by_name, mock_search):
+    """retrieve skips name-match hits with duplicate ids (branch coverage)."""
+    mock_embed.return_value = [0.1] * 1536
+    mock_search_by_name.return_value = [
+        {"id": "n1", "score": 0.95, "text": "t", "metadata": {"unit_name": "DGESV"}},
+        {"id": "n1", "score": 0.9, "text": "t2", "metadata": {"unit_name": "DGESV"}},
+    ]
+    mock_search.return_value = []
+
+    result = await retrieve("What is DGESV?", top_k=5)
+    assert result["retrieval_strategy"] == "name_match"
+    assert len(result["chunks"]) == 1
+
+
+@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
+@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
+@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_retrieve_skips_vector_duplicates(mock_embed, mock_search_by_name, mock_search):
+    """retrieve skips vector results already in seen_ids (branch coverage)."""
+    mock_embed.return_value = [0.1] * 1536
+    mock_search_by_name.return_value = [
+        {"id": "shared", "score": 0.95, "text": "t", "metadata": {"unit_name": "DGESV"}},
+    ]
+    mock_search.return_value = [
+        {"id": "shared", "score": 0.8, "text": "t2", "metadata": {}},
+        {"id": "v2", "score": 0.7, "text": "t3", "metadata": {}},
+    ]
+
+    result = await retrieve("What is DGESV?", top_k=5)
+    ids = [c["id"] for c in result["chunks"]]
+    assert ids.count("shared") == 1
+
+
+@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
+@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
+@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_retrieve_stops_merge_when_top_k_full(mock_embed, mock_search_by_name, mock_search):
+    """retrieve stops adding vector results when merged reaches top_k (branch coverage)."""
+    mock_embed.return_value = [0.1] * 1536
+    mock_search_by_name.return_value = [
+        {"id": "n1", "score": 0.99, "text": "t", "metadata": {"unit_name": "DGESV"}},
+        {"id": "n2", "score": 0.98, "text": "t", "metadata": {"unit_name": "DGESV"}},
+        {"id": "n3", "score": 0.97, "text": "t", "metadata": {"unit_name": "DGESV"}},
+    ]
+    mock_search.return_value = [
+        {"id": "v1", "score": 0.5, "text": "t", "metadata": {}},
+        {"id": "v2", "score": 0.4, "text": "t", "metadata": {}},
+    ]
+
+    result = await retrieve("What is DGESV?", top_k=3)
+    assert len(result["chunks"]) == 3
+    assert "v1" not in [c["id"] for c in result["chunks"]]

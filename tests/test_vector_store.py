@@ -1,9 +1,17 @@
 """Tests for the vector store service (mocked, no Qdrant calls)."""
 
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 
-from app.services.vector_store import ensure_collection, upsert_chunks, search, search_by_name
+from app.services.vector_store import (
+    ensure_collection,
+    upsert_chunks,
+    search,
+    search_by_name,
+    async_search,
+    async_search_by_name,
+    get_async_qdrant_client,
+)
 from app.services.chunker import Chunk
 
 
@@ -197,3 +205,76 @@ def test_upsert_chunks_multi_batch(mock_settings, mock_client_fn):
 
     upsert_chunks(chunks, embeddings)
     assert mock_client.upsert.call_count == 2
+
+
+@patch("app.services.vector_store.get_settings")
+def test_get_async_qdrant_client_returns_client(mock_settings):
+    """get_async_qdrant_client returns AsyncQdrantClient (covers lines 35-37)."""
+    settings = MagicMock()
+    settings.QDRANT_URL = "http://localhost:6333"
+    settings.QDRANT_API_KEY = ""
+    mock_settings.return_value = settings
+
+    get_async_qdrant_client.cache_clear()
+    try:
+        client = get_async_qdrant_client()
+        from qdrant_client import AsyncQdrantClient
+
+        assert isinstance(client, AsyncQdrantClient)
+    finally:
+        get_async_qdrant_client.cache_clear()
+
+
+@patch("app.services.vector_store.get_async_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+@pytest.mark.asyncio
+async def test_async_search(mock_settings, mock_client_fn):
+    """async_search calls query_points and returns formatted hits."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    mock_settings.return_value = settings
+
+    mock_point = MagicMock()
+    mock_point.id = "async-1"
+    mock_point.score = 0.88
+    mock_point.payload = {"text": "async code", "file_path": "async.f"}
+
+    mock_result = MagicMock()
+    mock_result.points = [mock_point]
+
+    mock_client = AsyncMock()
+    mock_client.query_points = AsyncMock(return_value=mock_result)
+    mock_client_fn.return_value = mock_client
+
+    results = await async_search([0.1] * 1536, top_k=5)
+    assert len(results) == 1
+    assert results[0]["score"] == 0.88
+    mock_client.query_points.assert_called_once()
+
+
+@patch("app.services.vector_store.get_async_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+@pytest.mark.asyncio
+async def test_async_search_by_name(mock_settings, mock_client_fn):
+    """async_search_by_name calls query_points with unit_name filter."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    mock_settings.return_value = settings
+
+    mock_point = MagicMock()
+    mock_point.id = "dgesv-async"
+    mock_point.score = 0.99
+    mock_point.payload = {"text": "DGESV code", "unit_name": "DGESV", "file_path": "dgesv.f"}
+
+    mock_result = MagicMock()
+    mock_result.points = [mock_point]
+
+    mock_client = AsyncMock()
+    mock_client.query_points = AsyncMock(return_value=mock_result)
+    mock_client_fn.return_value = mock_client
+
+    results = await async_search_by_name([0.1] * 1536, "DGESV", top_k=3)
+    assert len(results) == 1
+    assert results[0]["metadata"]["unit_name"] == "DGESV"
+    call_kwargs = mock_client.query_points.call_args.kwargs
+    assert "query_filter" in call_kwargs

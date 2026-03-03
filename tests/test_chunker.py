@@ -174,6 +174,16 @@ def test_sliding_window_empty_source():
     assert result == [""]
 
 
+def test_sliding_window_single_chunk_breaks_loop():
+    """_sliding_window_split breaks when end >= len(tokens) (branch coverage)."""
+    from app.services.chunker import _sliding_window_split, _count_tokens
+
+    short = "Hello world"
+    result = _sliding_window_split(short, max_tokens=100)
+    assert len(result) == 1
+    assert result[0] == short
+
+
 def test_sliding_window_min_tokens_clamp():
     """_sliding_window_split clamps max_tokens to MIN_WINDOW_TOKENS when smaller."""
     from app.services.chunker import _sliding_window_split
@@ -183,6 +193,17 @@ def test_sliding_window_min_tokens_clamp():
     assert len(result) >= 1
     for r in result:
         assert len(r) > 0
+
+
+def test_sliding_window_multiple_iterations():
+    """_sliding_window_split continues loop when end < len(tokens) (branch coverage)."""
+    from app.services.chunker import _sliding_window_split, _count_tokens
+
+    big = "word " * 800
+    result = _sliding_window_split(big, max_tokens=80)
+    assert len(result) >= 3
+    for r in result:
+        assert _count_tokens(r) <= 100
 
 
 def test_safety_truncation_when_chunk_exceeds_limit():

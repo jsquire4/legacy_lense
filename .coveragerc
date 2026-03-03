@@ -1,0 +1,9 @@
+[run]
+source = app
+branch = false
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError

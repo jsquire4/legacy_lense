@@ -291,7 +291,7 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
 
 # --- Eval endpoints (async — uses same fast pipeline as query endpoints) ---
 
-_EVAL_BATCH_SIZE = 5
+_EVAL_BATCH_SIZE = 3
 
 
 async def _run_retrieval_eval(i: int, item: dict) -> dict:

@@ -19,23 +19,23 @@
 |-----------|--------|------|
 | Query embedding | ~20 tokens | $0.0000004 |
 | Context assembly | ~6,000 tokens (prompt) | — |
-| LLM generation (prompt) | ~6,500 tokens | $0.00098 |
-| LLM generation (completion) | ~500 tokens | $0.0006 |
-| **Total per query** | | **~$0.0016** |
+| LLM generation (prompt) | ~6,500 tokens | $0.01625 |
+| LLM generation (completion) | ~500 tokens | $0.005 |
+| **Total per query** | | **~$0.021** |
 
 ### Expanded Query (LLM query expansion triggered)
 
 | Component | Tokens | Cost |
 |-----------|--------|------|
 | Query embedding | ~20 tokens | $0.0000004 |
-| Expansion LLM call (prompt) | ~150 tokens | $0.0000225 |
-| Expansion LLM call (completion) | ~30 tokens | $0.000018 |
+| Expansion LLM call (prompt) | ~150 tokens | $0.000375 |
+| Expansion LLM call (completion) | ~30 tokens | $0.0003 |
 | Context assembly | ~6,000 tokens (prompt) | — |
-| LLM generation (prompt) | ~6,500 tokens | $0.00098 |
-| LLM generation (completion) | ~500 tokens | $0.0006 |
-| **Total per expanded query** | | **~$0.0016** |
+| LLM generation (prompt) | ~6,500 tokens | $0.01625 |
+| LLM generation (completion) | ~500 tokens | $0.005 |
+| **Total per expanded query** | | **~$0.022** |
 
-Model: gpt-4o-mini ($0.150/1M input, $0.600/1M output)
+Model: gpt-4o ($2.50/1M input, $10.00/1M output)
 
 Note: Query expansion adds negligible cost (~$0.00004) because the expansion prompt is very small (max_tokens=50).
 
@@ -43,10 +43,10 @@ Note: Query expansion adds negligible cost (~$0.00004) because the expansion pro
 
 | Users | Queries/day (est.) | Monthly Cost | Annual Cost |
 |-------|--------------------|--------------|-------------|
-| 100 | 50 | $2.40 | $29 |
-| 1,000 | 500 | $24 | $288 |
-| 10,000 | 5,000 | $240 | $2,880 |
-| 100,000 | 50,000 | $2,400 | $28,800 |
+| 100 | 50 | $32 | $383 |
+| 1,000 | 500 | $315 | $3,833 |
+| 10,000 | 5,000 | $3,150 | $38,325 |
+| 100,000 | 50,000 | $31,500 | $383,250 |
 
 Assumptions: 0.5 queries per user per day, 30 days/month. ~60% of queries trigger expansion.
 
@@ -62,11 +62,11 @@ Assumptions: 0.5 queries per user per day, 30 days/month. ~60% of queries trigge
 1. **Caching**: Cache frequent queries to avoid redundant LLM calls (estimated 30-50% hit rate)
 2. **Smaller context**: Reduce top_k from 8 to 5 for simple queries
 3. **Batch queries**: Group similar queries for embedding efficiency
-4. **Model selection**: Use gpt-4o-mini (current) vs gpt-4o for cost-sensitive deployments
+4. **Model selection**: Use gpt-4o-mini instead of gpt-4o (current) for cost-sensitive deployments
 5. **Expansion gating**: Skip LLM expansion for queries that already contain routine names (already implemented)
 
 ## Break-even Analysis
 
-At 100k users ($2,400/mo API + $45/mo infra = $2,445/mo):
-- $0.024/user/month
+At 100k users ($31,500/mo API + $45/mo infra = $31,545/mo):
+- $0.32/user/month
 - Sustainable with a $1/mo subscription or ad-supported model

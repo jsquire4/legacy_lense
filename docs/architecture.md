@@ -19,7 +19,7 @@ User Query → FastAPI → Hybrid Retrieval → Context Assembly → LLM Generat
 5. **Vector Store** (`app/services/vector_store.py`) — Manages Qdrant collection operations
 6. **Retrieval Service** (`app/services/retrieval.py`) — Hybrid retrieval: name match + query expansion + call-graph + vector
 7. **Generation Service** (`app/services/generation.py`) — LLM answer generation with citation enforcement
-8. **Capabilities** (`app/services/capabilities.py`) — 4 specialized code understanding prompts
+8. **Capabilities** (`app/services/capabilities.py`) — 5 specialized code understanding prompts
 9. **Logging** (`app/logging_config.py`) — Structured JSON logging with rotating file handler
 
 ## Key Design Decisions
@@ -56,7 +56,7 @@ User Query → FastAPI → Hybrid Retrieval → Context Assembly → LLM Generat
 ### Why 6000-token context budget?
 - Fits maximum number of complete chunks within budget
 - Avoids mid-chunk truncation that loses context
-- Leaves room for system prompt and response within gpt-4o-mini's context window
+- Leaves room for system prompt and response within gpt-4o's context window
 
 ## Data Flow
 
@@ -78,7 +78,7 @@ User Query
   ├─ No name? → LLM query expansion → Search each expanded name
   └─ Vector similarity search (cosine, top_k=8)
       ↓
-  Merge & deduplicate → Context assembly (6K token budget) → gpt-4o-mini → Citation enforcement → Response
+  Merge & deduplicate → Context assembly (6K token budget) → gpt-4o → Citation enforcement → Response
 ```
 
 ## Observability
@@ -94,7 +94,7 @@ Structured JSON logs are written to `logs/legacylens.jsonl` with rotating file h
 ## Deployment
 
 - **Application**: Railway single service (Dockerfile auto-detected)
-- **Vector DB**: Qdrant Cloud (external, free tier)
+- **Vector DB**: Qdrant (Railway, internal network)
 - **Local dev**: `docker compose up --build` (one command)
 - **Ingestion**: Runs locally via `scripts/ingest.py`
 - **CI/CD**: Auto-deploys on push to GitHub

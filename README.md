@@ -83,7 +83,7 @@ Same request/response format as `/api/query`.
 ## Architecture
 
 ```
-Query → Embed → Hybrid Search → Context Assembly (6K tokens) → gpt-4o-mini → Citation-enforced Response
+Query → Embed → Hybrid Search → Context Assembly (6K tokens) → gpt-4o → Citation-enforced Response
 ```
 
 Hybrid search merges:
@@ -119,7 +119,7 @@ Environment variables required:
 ## Cost
 
 - **Ingestion**: ~$0.09 one-time (4.7M tokens embedded)
-- **Per query**: ~$0.0016 (gpt-4o-mini)
+- **Per query**: ~$0.021 (gpt-4o)
 - **Infrastructure**: $5/mo Railway (app + Qdrant)
 
 See [docs/cost_analysis.md](docs/cost_analysis.md) for scaling projections.
@@ -130,7 +130,7 @@ See [docs/cost_analysis.md](docs/cost_analysis.md) for scaling projections.
 |-----------|-----------|
 | Backend | Python 3.12, FastAPI |
 | Embeddings | OpenAI text-embedding-3-small (1536-dim) |
-| LLM | gpt-4o-mini |
+| LLM | gpt-4o |
 | Vector DB | Qdrant (Railway, internal network) |
 | Parser | fparser (AST-based Fortran parsing) |
 | Deployment | Railway + Docker |

@@ -34,13 +34,14 @@ def _extract_routine_name(query: str) -> str | None:
     return None
 
 
-async def _expand_query(query: str) -> list[str]:
+async def _expand_query(query: str, model: str | None = None) -> list[str]:
     """Use the LLM to identify relevant LAPACK routine names for a conceptual query."""
     try:
         client = get_async_openai_client()
         settings = get_settings()
+        resolved_model = model or settings.CHAT_MODEL
         response = await client.chat.completions.create(
-            model=settings.CHAT_MODEL,
+            model=resolved_model,
             messages=[
                 {"role": "system", "content": _EXPAND_PROMPT},
                 {"role": "user", "content": query},
@@ -76,7 +77,7 @@ async def _fan_out_name_search(
     return results
 
 
-async def retrieve(query: str, top_k: int = 5) -> dict:
+async def retrieve(query: str, top_k: int = 5, model: str | None = None) -> dict:
     """Embed a query and search — with name-boosted hybrid retrieval.
 
     Returns a dict with keys: chunks, expanded_names, retrieval_strategy.
@@ -104,7 +105,7 @@ async def retrieve(query: str, top_k: int = 5) -> dict:
                 seen_ids.add(h["id"])
     else:
         # Conceptual query — LLM expansion to find relevant routine names
-        expanded_names = await _expand_query(query)
+        expanded_names = await _expand_query(query, model=model)
         if expanded_names:
             strategy = "expansion"
             expansion_hits = await _fan_out_name_search(

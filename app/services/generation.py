@@ -124,6 +124,7 @@ async def generate_answer(
     max_tokens: int = 1500,
     context_budget: int = CONTEXT_TOKEN_BUDGET,
     track_ttft: bool = False,
+    model: str | None = None,
 ) -> dict:
     """Generate an answer using retrieved context chunks.
 
@@ -132,12 +133,13 @@ async def generate_answer(
     """
     settings = get_settings()
     client = _get_generation_client()
+    resolved_model = model or settings.CHAT_MODEL
 
     if not chunks:
         return {
             "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
             "citations": [],
-            "model": settings.CHAT_MODEL,
+            "model": resolved_model,
             "token_usage": {},
         }
 
@@ -145,11 +147,11 @@ async def generate_answer(
 
     if track_ttft:
         answer_text, token_usage, ttft_ms = await _generate_with_ttft(
-            client, settings.CHAT_MODEL, messages, max_tokens,
+            client, resolved_model, messages, max_tokens,
         )
     else:
         response = await client.chat.completions.create(
-            model=settings.CHAT_MODEL,
+            model=resolved_model,
             messages=messages,
             temperature=0.1,
             max_tokens=max_tokens,
@@ -181,7 +183,7 @@ async def generate_answer(
     result = {
         "answer": answer_text,
         "citations": citations,
-        "model": settings.CHAT_MODEL,
+        "model": resolved_model,
         "token_usage": token_usage,
     }
     if ttft_ms is not None:
@@ -230,6 +232,7 @@ async def generate_answer_stream(
     capability: str | None = None,
     max_tokens: int = 1500,
     context_budget: int = CONTEXT_TOKEN_BUDGET,
+    model: str | None = None,
 ):
     """Stream answer tokens, yielding dicts for each event.
 
@@ -239,6 +242,7 @@ async def generate_answer_stream(
     """
     settings = get_settings()
     client = _get_generation_client()
+    resolved_model = model or settings.CHAT_MODEL
 
     if not chunks:
         yield {
@@ -251,7 +255,7 @@ async def generate_answer_stream(
     messages = _build_messages(query, chunks, capability, context_budget)
 
     stream = await client.chat.completions.create(
-        model=settings.CHAT_MODEL,
+        model=resolved_model,
         messages=messages,
         temperature=0.1,
         max_tokens=max_tokens,

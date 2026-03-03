@@ -10,7 +10,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ app/
 
 RUN adduser --disabled-password --gecos '' appuser \
-    && mkdir -p /app/logs && chown appuser:appuser /app/logs
+    && mkdir -p /app/logs /app/data && chown appuser:appuser /app/logs /app/data
 USER appuser
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

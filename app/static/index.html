@@ -360,6 +360,42 @@
         .check-item.check-pass { background: rgba(166,226,46,0.12); color: #a6e22e; }
         .check-item.check-fail { background: rgba(249,38,114,0.12); color: #f92672; }
 
+        /* Model selector */
+        .model-select {
+            padding: 0.35rem 0.5rem; background: #1e1e1e; color: #d4d4d4;
+            border: 1px solid #3e3e3e; border-radius: 4px; font-size: 0.8rem;
+            cursor: pointer; min-width: 130px;
+        }
+        .model-select:focus { outline: none; border-color: #a6e22e; }
+
+        /* Trial history */
+        .trial-scroll { overflow-x: auto; }
+        .trial-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+        .trial-table th {
+            text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid #3e3e3e;
+            color: #888; font-weight: 600; font-size: 0.72rem; white-space: nowrap;
+        }
+        .trial-table td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #333; }
+        .trial-table .trial-model { font-family: monospace; color: #66d9ef; }
+        .trial-table .trial-cost { font-family: monospace; color: #ae81ff; }
+        .trial-table .trial-no-data { color: #555; }
+        .trial-table .trial-runs { font-family: monospace; font-size: 0.72rem; }
+        .trial-table tr.trial-no-runs td:not(.trial-model):not(.trial-cost) { color: #555; }
+        .trial-best { color: #a6e22e; font-weight: 700; }
+        .trial-delete {
+            background: transparent; color: #f92672; border: 1px solid #f92672;
+            padding: 0.15rem 0.4rem; border-radius: 3px; cursor: pointer;
+            font-size: 0.7rem;
+        }
+        .trial-delete:hover { background: #f9267222; }
+        .save-trial-btn {
+            padding: 0.35rem 0.75rem; background: #49483e; color: #e6db74;
+            border: 1px solid #e6db74; border-radius: 4px; cursor: pointer;
+            font-size: 0.78rem; font-weight: 600; margin-left: 0.5rem;
+        }
+        .save-trial-btn:hover { background: #e6db7422; }
+        .save-trial-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
         /* Architecture */
         .arch-section { margin-bottom: 1.5rem; }
         .arch-section h3 { color: #f8f8f2; font-size: 0.95rem; margin-bottom: 0.5rem; font-weight: 600; }
@@ -424,6 +460,7 @@
                     <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
                     <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
                 </div>
+                <select id="model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="submit" onclick="submitQuery()">Ask</button>
             </div>
         </div>
@@ -464,7 +501,9 @@
         <div class="panel">
             <h2 class="panel-title">Retrieval Evals</h2>
             <div class="eval-controls">
+                <select id="eval-model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
+                <button class="save-trial-btn" id="eval-save-btn" onclick="saveRetrievalTrial()" disabled>Save Trial</button>
                 <span class="eval-status" id="eval-status"></span>
             </div>
             <div class="eval-metrics" id="eval-metrics" style="display:none">
@@ -481,7 +520,9 @@
         <div class="panel">
             <h2 class="panel-title">E2E Generation Evals</h2>
             <div class="eval-controls">
+                <select id="e2e-model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="e2e-btn" onclick="runE2EEvals()">Run E2E</button>
+                <button class="save-trial-btn" id="e2e-save-btn" onclick="saveE2ETrial()" disabled>Save Trial</button>
                 <span class="eval-status" id="e2e-status"></span>
             </div>
             <div class="eval-metrics" id="e2e-metrics" style="display:none">
@@ -492,6 +533,17 @@
                 </div>
             </div>
             <div class="eval-rows" id="e2e-rows"></div>
+        </div>
+
+        <!-- Trial History -->
+        <div class="panel">
+            <h2 class="panel-title">Trial History</h2>
+            <div class="trial-scroll">
+                <table class="trial-table" id="trials-table">
+                    <thead><tr><th>Model</th><th>Input $/1M</th><th>Output $/1M</th><th>Recall@5</th><th>Ret. Latency</th><th>Pass Rate</th><th>E2E Latency</th><th>Ret. Runs</th><th>E2E Runs</th><th></th></tr></thead>
+                    <tbody id="trials-body"><tr><td colspan="10" style="color:#555">Loading models...</td></tr></tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Architecture -->
@@ -509,20 +561,17 @@
                     <span class="pipeline-arrow">&#8594;</span>
                     <div class="pipeline-step"><div class="step-title">Context</div><div class="step-tech">6K token budget</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Generate</div><div class="step-tech">gpt-4o-mini</div></div>
+                    <div class="pipeline-step"><div class="step-title">Generate</div><div class="step-tech">OpenAI Models</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
                     <div class="pipeline-step"><div class="step-title">Response</div><div class="step-tech">Citations enforced</div></div>
                 </div>
             </div>
             <div class="arch-section">
                 <h3>Key Stats</h3>
-                <div class="stats-grid">
-                    <div class="stat-card"><div class="stat-num">2,272</div><div class="stat-label">Fortran files indexed</div></div>
-                    <div class="stat-card"><div class="stat-num">2,334</div><div class="stat-label">Chunks stored</div></div>
-                    <div class="stat-card"><div class="stat-num">&gt;0.90</div><div class="stat-label">Avg. Recall@5</div></div>
-                    <div class="stat-card"><div class="stat-num">&lt;500ms</div><div class="stat-label">Avg. Retrieval</div></div>
-                    <div class="stat-card"><div class="stat-num">&lt;3s</div><div class="stat-label">Avg. End-to-End</div></div>
-                </div>
+                <ul class="component-list">
+                    <li><strong>Fortran files indexed:</strong> <span>2,272</span></li>
+                    <li><strong>Chunks stored:</strong> <span>2,334</span></li>
+                </ul>
             </div>
             <div class="arch-section">
                 <h3>Retrieval Strategy</h3>
@@ -557,6 +606,11 @@
 
     <script>
         let selectedCapability = "";
+        let queryModel = "";
+        let evalModel = "";
+        let e2eModel = "";
+        let lastRetrievalSummary = null;
+        let lastE2ESummary = null;
 
         const capPlaceholders = {
             "": "e.g., What does the DGESV subroutine do?",
@@ -902,7 +956,9 @@
 
             try {
                 const url = selectedCapability ? `/api/capabilities/${selectedCapability}/stream` : "/api/query/stream";
-                await readSSE(url, "POST", { query }, ({ event, data }) => {
+                const body = { query };
+                if (queryModel) body.model = queryModel;
+                await readSSE(url, "POST", body, ({ event, data }) => {
                     if (event === "retrieval") {
                         spinner.classList.remove("visible");
                         resultDiv.classList.add("visible");
@@ -947,7 +1003,8 @@
 
             let runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
             try {
-                await readSSE("/api/eval/stream", "GET", null, ({ event, data }) => {
+                const evalUrl = evalModel ? `/api/eval/stream?model=${encodeURIComponent(evalModel)}` : "/api/eval/stream";
+                await readSSE(evalUrl, "GET", null, ({ event, data }) => {
                     if (event === "progress") {
                         completed++;
                         runningRecall += data.recall_at_5;
@@ -962,6 +1019,8 @@
                         latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
                         progressEl.textContent = `${total} / ${total}`;
                         statusEl.textContent = "Done";
+                        lastRetrievalSummary = data;
+                        document.getElementById("eval-save-btn").disabled = false;
                     }
                 });
             } catch (err) { statusEl.textContent = `Error: ${err.message}`; }
@@ -983,7 +1042,8 @@
 
             let totalPassed = 0, runningLatency = 0, completed = 0, total = 0;
             try {
-                await readSSE("/api/eval/e2e/stream", "GET", null, ({ event, data }) => {
+                const e2eUrl = e2eModel ? `/api/eval/e2e/stream?model=${encodeURIComponent(e2eModel)}` : "/api/eval/e2e/stream";
+                await readSSE(e2eUrl, "GET", null, ({ event, data }) => {
                     if (event === "progress") {
                         completed++;
                         if (data.passed) totalPassed++;
@@ -998,11 +1058,181 @@
                         latencyEl.textContent = data.avg_latency_ms.toFixed(0) + "ms";
                         progressEl.textContent = `${total} / ${total}`;
                         statusEl.textContent = `Done — ${data.passed}/${total} passed`;
+                        lastE2ESummary = data;
+                        document.getElementById("e2e-save-btn").disabled = false;
                     }
                 });
             } catch (err) { statusEl.textContent = `Error: ${err.message}`; }
             finally { btn.disabled = false; }
         }
+        // --- Model selector & pricing ---
+        let modelsData = [];
+        function populateModelSelect(selectId, onChange) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = "";
+            modelsData.forEach(m => {
+                const opt = document.createElement("option");
+                opt.value = m.name;
+                opt.textContent = m.name + (m.default ? " (default)" : "");
+                if (m.default) opt.selected = true;
+                select.appendChild(opt);
+            });
+            select.addEventListener("change", () => onChange(select.value));
+            onChange(select.value);
+        }
+        async function loadModels() {
+            try {
+                const res = await fetch("/api/models");
+                const data = await res.json();
+                modelsData = data.models;
+                populateModelSelect("model-select", v => { queryModel = v; });
+                populateModelSelect("eval-model-select", v => { evalModel = v; });
+                populateModelSelect("e2e-model-select", v => { e2eModel = v; });
+            } catch (e) { console.error("Failed to load models", e); }
+        }
+
+        // --- Trial save/list/delete ---
+        function defaultModelName() {
+            return (modelsData.find(m => m.default) || {}).name || "gpt-4o-mini";
+        }
+
+        async function saveRetrievalTrial() {
+            if (!lastRetrievalSummary) return;
+            const btn = document.getElementById("eval-save-btn");
+            btn.disabled = true;
+            try {
+                const s = lastRetrievalSummary;
+                const body = {
+                    model: evalModel || defaultModelName(),
+                    eval_type: "retrieval",
+                    avg_recall_at_5: s.avg_recall_at_5,
+                    avg_retrieval_latency_ms: s.avg_latency_ms,
+                    total_queries: s.total_queries,
+                };
+                const res = await fetch("/api/trials", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+                if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+                await loadTrials();
+            } catch (e) {
+                console.error("Failed to save retrieval trial", e);
+                btn.disabled = false;
+            }
+        }
+
+        async function saveE2ETrial() {
+            if (!lastE2ESummary) return;
+            const btn = document.getElementById("e2e-save-btn");
+            btn.disabled = true;
+            try {
+                const s = lastE2ESummary;
+                const body = {
+                    model: e2eModel || defaultModelName(),
+                    eval_type: "e2e",
+                    pass_rate: s.pass_rate,
+                    avg_e2e_latency_ms: s.avg_latency_ms,
+                    total_queries: s.total_queries,
+                };
+                const res = await fetch("/api/trials", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
+                if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+                await loadTrials();
+            } catch (e) {
+                console.error("Failed to save E2E trial", e);
+                btn.disabled = false;
+            }
+        }
+
+        async function loadTrials() {
+            const tbody = document.getElementById("trials-body");
+            if (!modelsData.length) {
+                tbody.innerHTML = '<tr><td colspan="10" style="color:#555">Loading models...</td></tr>';
+                return;
+            }
+            let trials = [];
+            try {
+                const res = await fetch("/api/trials");
+                const data = await res.json();
+                trials = data.trials || [];
+            } catch (e) {
+                console.error("Failed to fetch trials", e);
+            }
+
+            // Aggregate trials by model: latest retrieval + latest e2e per model
+            const byModel = {};
+            // trials are already newest-first from the API
+            for (const t of trials) {
+                if (!byModel[t.model]) byModel[t.model] = { retrieval: [], e2e: [] };
+                if (t.eval_type === "retrieval") byModel[t.model].retrieval.push(t);
+                else if (t.eval_type === "e2e") byModel[t.model].e2e.push(t);
+            }
+
+            // Build per-model aggregates
+            const rows = modelsData.map(m => {
+                const agg = byModel[m.name] || { retrieval: [], e2e: [] };
+                const latestRet = agg.retrieval[0];
+                const latestE2E = agg.e2e[0];
+                return {
+                    m,
+                    latestRet,
+                    latestE2E,
+                    retRuns: agg.retrieval.length,
+                    e2eRuns: agg.e2e.length,
+                    recall: latestRet && latestRet.avg_recall_at_5 != null ? latestRet.avg_recall_at_5 : null,
+                    retLat: latestRet && latestRet.avg_retrieval_latency_ms != null ? latestRet.avg_retrieval_latency_ms : null,
+                    passRate: latestE2E && latestE2E.pass_rate != null ? latestE2E.pass_rate : null,
+                    e2eLat: latestE2E && latestE2E.avg_e2e_latency_ms != null ? latestE2E.avg_e2e_latency_ms : null,
+                    allIds: [...agg.retrieval, ...agg.e2e].map(t => t.id),
+                };
+            });
+
+            // Find best values (highest recall, lowest ret latency, highest pass rate, lowest e2e latency)
+            const vals = (key) => rows.map(r => r[key]).filter(v => v != null);
+            const bestRecall = Math.max(...vals("recall"), -Infinity);
+            const bestRetLat = Math.min(...vals("retLat"), Infinity);
+            const bestPassRate = Math.max(...vals("passRate"), -Infinity);
+            const bestE2ELat = Math.min(...vals("e2eLat"), Infinity);
+
+            tbody.innerHTML = "";
+            const dash = '<span class="trial-no-data">--</span>';
+            const best = (val, target) => val != null && val === target ? ' class="trial-best"' : '';
+
+            for (const r of rows) {
+                const name = r.m.name;
+                const inCost = r.m.input_cost_per_1m != null ? "$" + r.m.input_cost_per_1m.toFixed(2) : "--";
+                const outCost = r.m.output_cost_per_1m != null ? "$" + r.m.output_cost_per_1m.toFixed(2) : "--";
+                const hasData = r.retRuns > 0 || r.e2eRuns > 0;
+
+                const tr = document.createElement("tr");
+                if (!hasData) tr.className = "trial-no-runs";
+                tr.innerHTML =
+                    `<td class="trial-model">${name}</td>` +
+                    `<td class="trial-cost">${inCost}</td>` +
+                    `<td class="trial-cost">${outCost}</td>` +
+                    `<td${best(r.recall, bestRecall)}>${r.recall != null ? r.recall.toFixed(3) : dash}</td>` +
+                    `<td${best(r.retLat, bestRetLat)}>${r.retLat != null ? r.retLat.toFixed(0) + "ms" : dash}</td>` +
+                    `<td${best(r.passRate, bestPassRate)}>${r.passRate != null ? (r.passRate * 100).toFixed(0) + "%" : dash}</td>` +
+                    `<td${best(r.e2eLat, bestE2ELat)}>${r.e2eLat != null ? r.e2eLat.toFixed(0) + "ms" : dash}</td>` +
+                    `<td class="trial-runs">${r.retRuns || dash}</td>` +
+                    `<td class="trial-runs">${r.e2eRuns || dash}</td>` +
+                    `<td>${hasData ? '<button class="trial-delete" onclick="deleteModelTrials([' + r.allIds.join(",") + '])">Clear</button>' : ""}</td>`;
+                tbody.appendChild(tr);
+            }
+        }
+
+        async function deleteModelTrials(ids) {
+            await Promise.all(ids.map(id => fetch(`/api/trials/${id}`, { method: "DELETE" })));
+            await loadTrials();
+        }
+
+        async function deleteTrial(id) {
+            await fetch(`/api/trials/${id}`, { method: "DELETE" });
+            await loadTrials();
+        }
+
+        // Init — models must load before trials so the table can render all models
+        async function init() {
+            await loadModels();
+            await loadTrials();
+        }
+        init();
     </script>
 </body>
 </html>

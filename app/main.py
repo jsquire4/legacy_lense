@@ -17,6 +17,8 @@ from app.config import get_settings
 from app.services.retrieval import retrieve
 from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
+from app.services.trial_store import save_trial, list_trials, delete_trial
+from app.models_data import MODELS, MODEL_NAMES
 from app.logging_config import setup_logging
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
 
@@ -30,8 +32,8 @@ _CACHE_MAX = 64
 _CACHE_TTL = 300  # 5 minutes
 
 
-def _cache_key(query: str, top_k: int, capability: str | None) -> str:
-    raw = f"{query}|{top_k}|{capability}"
+def _cache_key(query: str, top_k: int, capability: str | None, model: str | None = None) -> str:
+    raw = f"{query}|{top_k}|{capability}|{model}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -73,6 +75,7 @@ app.add_middleware(
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=20)
+    model: str | None = None
 
 
 class ChunkDetail(BaseModel):
@@ -114,6 +117,7 @@ class QueryResponse(BaseModel):
 class CapabilityRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=20)
+    model: str | None = None
 
 
 # --- Endpoints ---
@@ -140,9 +144,9 @@ def _build_chunk_details(chunks: list[dict]) -> list[ChunkDetail]:
     return details
 
 
-async def _build_response(query: str, top_k: int, capability: str | None = None) -> QueryResponse:
+async def _build_response(query: str, top_k: int, capability: str | None = None, model: str | None = None) -> QueryResponse:
     """Shared logic for query and capability endpoints."""
-    key = _cache_key(query, top_k, capability)
+    key = _cache_key(query, top_k, capability, model)
     cached = _cache_get(key)
     if cached is not None:
         logger.info("Cache hit for query: %.80s", query)
@@ -150,11 +154,11 @@ async def _build_response(query: str, top_k: int, capability: str | None = None)
 
     t0 = time.time()
 
-    retrieval_result = await retrieve(query, top_k)
+    retrieval_result = await retrieve(query, top_k, model=model)
     chunks = retrieval_result["chunks"]
     t_retrieval = time.time()
 
-    result = await generate_answer(query, chunks, capability)
+    result = await generate_answer(query, chunks, capability, model=model)
     t_generation = time.time()
 
     retrieval_ms = round((t_retrieval - t0) * 1000, 1)
@@ -204,14 +208,14 @@ async def _build_response(query: str, top_k: int, capability: str | None = None)
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
-    return await _build_response(req.query, req.top_k, None)
+    return await _build_response(req.query, req.top_k, None, model=req.model)
 
 
 @app.post("/api/capabilities/{capability}", response_model=QueryResponse)
 async def capability_endpoint(capability: str, req: CapabilityRequest):
     if capability not in CAPABILITIES:
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
-    return await _build_response(req.query, req.top_k, capability)
+    return await _build_response(req.query, req.top_k, capability, model=req.model)
 
 
 def _sse_event(event: str, data: dict) -> str:
@@ -219,11 +223,11 @@ def _sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-async def _stream_generator(query: str, top_k: int, capability: str | None = None):
+async def _stream_generator(query: str, top_k: int, capability: str | None = None, model: str | None = None):
     """Async generator that yields SSE events: retrieval, token*, done."""
     t0 = time.time()
 
-    retrieval_result = await retrieve(query, top_k)
+    retrieval_result = await retrieve(query, top_k, model=model)
     chunks = retrieval_result["chunks"]
     t_retrieval = time.time()
     retrieval_ms = round((t_retrieval - t0) * 1000, 1)
@@ -253,7 +257,7 @@ async def _stream_generator(query: str, top_k: int, capability: str | None = Non
     })
 
     # Stream generation tokens
-    async for event in generate_answer_stream(query, chunks, capability):
+    async for event in generate_answer_stream(query, chunks, capability, model=model):
         if event["type"] == "token":
             yield _sse_event("token", {"token": event["token"]})
         elif event["type"] == "done":
@@ -274,7 +278,7 @@ async def _stream_generator(query: str, top_k: int, capability: str | None = Non
 @app.post("/api/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, None),
+        _stream_generator(req.query, req.top_k, None, model=req.model),
         media_type="text/event-stream",
     )
 
@@ -285,7 +289,7 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
 
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, capability),
+        _stream_generator(req.query, req.top_k, capability, model=req.model),
         media_type="text/event-stream",
     )
 
@@ -295,7 +299,7 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
 _RETRIEVAL_BATCH_SIZE = 5
 
 
-async def _eval_stream_generator():
+async def _eval_stream_generator(model: str | None = None):
     """Async generator — batch retrieval evals (no LLM generation, safe to parallelize)."""
     total_recall = 0.0
     total_latency = 0.0
@@ -308,7 +312,7 @@ async def _eval_stream_generator():
             query = item["query"]
             expected = item["expected_files"]
             t0 = time.time()
-            result = await retrieve(query, top_k=5)
+            result = await retrieve(query, top_k=5, model=model)
             latency_ms = round((time.time() - t0) * 1000, 1)
             retrieved_files = []
             seen = set()
@@ -344,7 +348,7 @@ _E2E_MAX_TOKENS = 150
 _E2E_CONTEXT_BUDGET = 1000
 
 
-async def _e2e_eval_stream_generator():
+async def _e2e_eval_stream_generator(model: str | None = None):
     """Async generator — batch retrieval, then generate sequentially.
 
     Retrieval is fast (Qdrant + embed) and safe to fully parallelize.
@@ -357,7 +361,7 @@ async def _e2e_eval_stream_generator():
 
     # Phase 1: batch all retrievals concurrently (fast)
     async def run_retrieval(i, item):
-        return i, item, await retrieve(item["query"], top_k=5)
+        return i, item, await retrieve(item["query"], top_k=5, model=model)
 
     retrieval_results = await asyncio.gather(*[
         run_retrieval(i, item) for i, item in enumerate(E2E_EVAL_QUERIES)
@@ -375,6 +379,7 @@ async def _e2e_eval_stream_generator():
             query, chunks, capability,
             max_tokens=_E2E_MAX_TOKENS,
             context_budget=_E2E_CONTEXT_BUDGET,
+            model=model,
         )
         latency_ms = round((time.time() - t0) * 1000, 1)
 
@@ -408,17 +413,73 @@ async def _e2e_eval_stream_generator():
 
 
 @app.get("/api/eval/stream")
-async def eval_stream_endpoint():
+async def eval_stream_endpoint(model: str | None = None):
     return StreamingResponse(
-        _eval_stream_generator(), media_type="text/event-stream",
+        _eval_stream_generator(model=model), media_type="text/event-stream",
     )
 
 
 @app.get("/api/eval/e2e/stream")
-async def e2e_eval_stream_endpoint():
+async def e2e_eval_stream_endpoint(model: str | None = None):
     return StreamingResponse(
-        _e2e_eval_stream_generator(), media_type="text/event-stream",
+        _e2e_eval_stream_generator(model=model), media_type="text/event-stream",
     )
+
+
+# --- Model & Trial endpoints ---
+
+class TrialRequest(BaseModel):
+    model: str
+    eval_type: str
+    avg_recall_at_5: float | None = None
+    pass_rate: float | None = None
+    avg_retrieval_latency_ms: float | None = None
+    avg_e2e_latency_ms: float | None = None
+    total_queries: int | None = None
+    notes: str = ""
+
+
+@app.get("/api/models")
+async def models_endpoint():
+    settings = get_settings()
+    return {
+        "models": [
+            {"name": name, "default": name == settings.CHAT_MODEL, **info}
+            for name, info in MODELS.items()
+        ]
+    }
+
+
+@app.post("/api/trials")
+async def create_trial_endpoint(req: TrialRequest):
+    pricing = MODELS.get(req.model, {})
+    data = {
+        "model": req.model,
+        "eval_type": req.eval_type,
+        "avg_recall_at_5": req.avg_recall_at_5,
+        "pass_rate": req.pass_rate,
+        "avg_retrieval_latency_ms": req.avg_retrieval_latency_ms,
+        "avg_e2e_latency_ms": req.avg_e2e_latency_ms,
+        "total_queries": req.total_queries,
+        "input_cost_per_1m": pricing.get("input_cost_per_1m"),
+        "output_cost_per_1m": pricing.get("output_cost_per_1m"),
+        "notes": req.notes,
+    }
+    trial_id = save_trial(data)
+    return {"id": trial_id}
+
+
+@app.get("/api/trials")
+async def list_trials_endpoint():
+    return {"trials": list_trials()}
+
+
+@app.delete("/api/trials/{trial_id}")
+async def delete_trial_endpoint(trial_id: int):
+    deleted = delete_trial(trial_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Trial not found")
+    return {"deleted": True}
 
 
 @app.get("/")

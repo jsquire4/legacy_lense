@@ -231,6 +231,48 @@ async def test_retrieve_skips_vector_duplicates(mock_embed, mock_search_by_name,
 @patch("app.services.retrieval.async_search", new_callable=AsyncMock)
 @patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
 @patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
+@patch("app.services.retrieval._expand_query", new_callable=AsyncMock)
+@pytest.mark.asyncio
+async def test_retrieve_passes_model_to_expand_query(mock_expand, mock_embed, mock_search_by_name, mock_search):
+    """retrieve passes model override to _expand_query."""
+    mock_embed.return_value = [0.1] * 1536
+    mock_expand.return_value = []
+    mock_search_by_name.return_value = []
+    mock_search.return_value = [
+        {"id": "v1", "score": 0.9, "text": "t", "metadata": {}},
+    ]
+
+    await retrieve("How does SVD work?", top_k=5, model="gpt-4o")
+    mock_expand.assert_called_once_with("How does SVD work?", model="gpt-4o")
+
+
+@patch("app.services.retrieval.get_async_openai_client")
+@patch("app.services.retrieval.get_settings")
+@pytest.mark.asyncio
+async def test_expand_query_uses_model_override(mock_settings, mock_client_fn):
+    """_expand_query uses provided model instead of settings.CHAT_MODEL."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    mock_msg = MagicMock()
+    mock_msg.content = "DGESVD DGESDD"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message = mock_msg
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    mock_client_fn.return_value = mock_client
+
+    await _expand_query("How does SVD work?", model="gpt-4o")
+    call_kwargs = mock_client.chat.completions.create.call_args
+    assert call_kwargs.kwargs.get("model") == "gpt-4o" or call_kwargs[1].get("model") == "gpt-4o"
+
+
+@patch("app.services.retrieval.async_search", new_callable=AsyncMock)
+@patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock)
+@patch("app.services.retrieval.embed_query", new_callable=AsyncMock)
 @pytest.mark.asyncio
 async def test_retrieve_stops_merge_when_top_k_full(mock_embed, mock_search_by_name, mock_search):
     """retrieve stops adding vector results when merged reaches top_k (branch coverage)."""

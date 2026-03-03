@@ -1,5 +1,7 @@
 """Smoke tests for FastAPI endpoints."""
 
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
@@ -472,3 +474,106 @@ def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate):
     # At least one should have passed=False due to our mock
     failed = [p for p in progress_events if not p["data"].get("passed", True)]
     assert len(failed) >= 1
+
+
+# --- Model endpoint tests ---
+
+def test_models_endpoint():
+    response = client.get("/api/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert "models" in data
+    models = data["models"]
+    assert len(models) >= 9
+    names = [m["name"] for m in models]
+    assert "gpt-4o-mini" in names
+    assert "gpt-4o" in names
+    # Check default flag
+    defaults = [m for m in models if m.get("default")]
+    assert len(defaults) == 1
+    # Check pricing fields
+    for m in models:
+        assert "input_cost_per_1m" in m
+        assert "output_cost_per_1m" in m
+
+
+# --- Trial CRUD endpoint tests ---
+
+@patch("app.main.save_trial")
+def test_create_trial_endpoint(mock_save):
+    mock_save.return_value = 1
+    response = client.post("/api/trials", json={
+        "model": "gpt-4o-mini",
+        "eval_type": "retrieval",
+        "avg_recall_at_5": 0.85,
+        "total_queries": 10,
+    })
+    assert response.status_code == 200
+    assert response.json() == {"id": 1}
+    mock_save.assert_called_once()
+
+
+@patch("app.main.list_trials")
+def test_list_trials_endpoint(mock_list):
+    mock_list.return_value = [
+        {"id": 1, "model": "gpt-4o-mini", "eval_type": "retrieval"},
+    ]
+    response = client.get("/api/trials")
+    assert response.status_code == 200
+    assert len(response.json()["trials"]) == 1
+
+
+@patch("app.main.delete_trial")
+def test_delete_trial_endpoint(mock_delete):
+    mock_delete.return_value = True
+    response = client.delete("/api/trials/1")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
+
+
+@patch("app.main.delete_trial")
+def test_delete_trial_not_found(mock_delete):
+    mock_delete.return_value = False
+    response = client.delete("/api/trials/999")
+    assert response.status_code == 404
+
+
+# --- Model param on query/eval endpoints ---
+
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_endpoint_with_model(mock_retrieve, mock_generate):
+    """Query endpoint passes model param through."""
+    mock_retrieve.return_value = {
+        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "t.f"}, "_match_type": "vector"}],
+        "expanded_names": [],
+        "retrieval_strategy": "vector",
+    }
+    mock_generate.return_value = {
+        "answer": "Answer", "citations": [], "model": "gpt-4o", "token_usage": {},
+    }
+
+    import app.main as main_mod
+    main_mod._RESPONSE_CACHE.clear()
+    try:
+        response = client.post("/api/query", json={"query": "test model param", "model": "gpt-4o"})
+        assert response.status_code == 200
+        mock_retrieve.assert_called_once()
+        _, kwargs = mock_retrieve.call_args
+        assert kwargs.get("model") == "gpt-4o" or mock_retrieve.call_args[1].get("model") == "gpt-4o"
+    finally:
+        main_mod._RESPONSE_CACHE.clear()
+
+
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_eval_stream_with_model_param(mock_retrieve):
+    """Eval stream endpoint accepts model query param."""
+    mock_retrieve.return_value = {
+        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}],
+        "expanded_names": [],
+        "retrieval_strategy": "name_match",
+    }
+    response = client.get("/api/eval/stream?model=gpt-4o")
+    assert response.status_code == 200
+    events = _parse_sse_events(response.text)
+    assert any(e["event"] == "summary" for e in events)

@@ -21,3 +21,11 @@ def is_reasoning_model(model: str) -> bool:
     Reasoning models reject temperature/top_p and need reasoning_effort instead.
     """
     return model.startswith("gpt-5")
+
+
+def uses_legacy_max_tokens(model: str) -> bool:
+    """Return True if the model uses max_tokens instead of max_completion_tokens.
+
+    Older models (gpt-3.5-turbo) don't support max_completion_tokens.
+    """
+    return model.startswith("gpt-3.5")

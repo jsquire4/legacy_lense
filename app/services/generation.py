@@ -11,7 +11,7 @@ from functools import lru_cache
 from openai import AsyncOpenAI
 
 from app.config import get_settings
-from app.models_data import is_reasoning_model
+from app.models_data import is_reasoning_model, uses_legacy_max_tokens
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,11 @@ def _get_generation_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=1)
 
 CONTEXT_TOKEN_BUDGET = 3000
+
+
+def _token_limit_key(model: str) -> str:
+    """Return the correct API parameter name for the token limit."""
+    return "max_tokens" if uses_legacy_max_tokens(model) else "max_completion_tokens"
 
 
 def _count_tokens(text: str) -> int:
@@ -154,8 +159,8 @@ async def generate_answer(
         kwargs = dict(
             model=resolved_model,
             messages=messages,
-            max_completion_tokens=max_completion_tokens,
         )
+        kwargs[_token_limit_key(resolved_model)] = max_completion_tokens
         if is_reasoning_model(resolved_model):
             kwargs["reasoning_effort"] = "low"
         else:
@@ -204,10 +209,10 @@ async def _generate_with_ttft(client, model, messages, max_completion_tokens):
     kwargs = dict(
         model=model,
         messages=messages,
-        max_completion_tokens=max_completion_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )
+    kwargs[_token_limit_key(model)] = max_completion_tokens
     if is_reasoning_model(model):
         kwargs["reasoning_effort"] = "low"
     else:
@@ -266,10 +271,10 @@ async def generate_answer_stream(
     kwargs = dict(
         model=resolved_model,
         messages=messages,
-        max_completion_tokens=max_completion_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )
+    kwargs[_token_limit_key(resolved_model)] = max_completion_tokens
     if is_reasoning_model(resolved_model):
         kwargs["reasoning_effort"] = "low"
     else:

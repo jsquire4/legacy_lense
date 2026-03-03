@@ -7,7 +7,7 @@ import re
 from app.services.embeddings import embed_query, get_async_openai_client
 from app.services.vector_store import async_search, async_search_by_name
 from app.config import get_settings
-from app.models_data import is_reasoning_model
+from app.models_data import is_reasoning_model, uses_legacy_max_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +41,15 @@ async def _expand_query(query: str, model: str | None = None) -> list[str]:
         client = get_async_openai_client()
         settings = get_settings()
         resolved_model = model or settings.CHAT_MODEL
+        token_key = "max_tokens" if uses_legacy_max_tokens(resolved_model) else "max_completion_tokens"
         kwargs = dict(
             model=resolved_model,
             messages=[
                 {"role": "system", "content": _EXPAND_PROMPT},
                 {"role": "user", "content": query},
             ],
-            max_completion_tokens=50,
         )
+        kwargs[token_key] = 50
         if is_reasoning_model(resolved_model):
             kwargs["reasoning_effort"] = "low"
         else:

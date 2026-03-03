@@ -26,13 +26,15 @@ BATCH_SIZE = 100
 @lru_cache
 def get_qdrant_client() -> QdrantClient:
     settings = get_settings()
-    return QdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
+    api_key = settings.QDRANT_API_KEY or None
+    return QdrantClient(url=settings.QDRANT_URL, api_key=api_key)
 
 
 @lru_cache
 def get_async_qdrant_client() -> AsyncQdrantClient:
     settings = get_settings()
-    return AsyncQdrantClient(url=settings.QDRANT_URL, api_key=settings.QDRANT_API_KEY)
+    api_key = settings.QDRANT_API_KEY or None
+    return AsyncQdrantClient(url=settings.QDRANT_URL, api_key=api_key)
 
 
 def _format_hits(points) -> list[dict]:

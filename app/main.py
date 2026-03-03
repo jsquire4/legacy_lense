@@ -240,6 +240,7 @@ async def _stream_generator(query: str, top_k: int, capability: str | None = Non
             "routine_name": meta.get("unit_name", ""),
             "score": round(chunk.get("score", 0.0), 4),
             "match_type": chunk.get("_match_type", "vector"),
+            "text": chunk.get("text", ""),
         })
 
     yield _sse_event("retrieval", {
@@ -339,12 +340,16 @@ async def _eval_stream_generator():
     })
 
 
-async def _e2e_eval_stream_generator():
-    """Async generator — batch retrieval, then generate one at a time.
+_E2E_MAX_TOKENS = 150
+_E2E_CONTEXT_BUDGET = 1000
 
-    Retrieval is fast (Qdrant + embed) and safe to parallelize.
-    Generation hits OpenAI LLM and gets throttled when concurrent,
-    so we run it sequentially to keep per-query latency low.
+
+async def _e2e_eval_stream_generator():
+    """Async generator — batch retrieval, then generate sequentially.
+
+    Retrieval is fast (Qdrant + embed) and safe to fully parallelize.
+    Generation runs one at a time with reduced token limits and a
+    dedicated client (max_retries=1) to avoid hidden backoff delays.
     """
     n = len(E2E_EVAL_QUERIES)
     total_passed = 0
@@ -352,13 +357,13 @@ async def _e2e_eval_stream_generator():
 
     # Phase 1: batch all retrievals concurrently (fast)
     async def run_retrieval(i, item):
-        return i, item, await retrieve(item["query"], top_k=8)
+        return i, item, await retrieve(item["query"], top_k=5)
 
     retrieval_results = await asyncio.gather(*[
         run_retrieval(i, item) for i, item in enumerate(E2E_EVAL_QUERIES)
     ])
 
-    # Phase 2: generate answers sequentially (avoids OpenAI throttling)
+    # Phase 2: generate sequentially with reduced limits
     for i, item, retrieval_result in sorted(retrieval_results, key=lambda x: x[0]):
         query = item["query"]
         capability = item.get("capability")
@@ -366,7 +371,11 @@ async def _e2e_eval_stream_generator():
         chunks = retrieval_result["chunks"]
 
         t0 = time.time()
-        gen_result = await generate_answer(query, chunks, capability)
+        gen_result = await generate_answer(
+            query, chunks, capability,
+            max_tokens=_E2E_MAX_TOKENS,
+            context_budget=_E2E_CONTEXT_BUDGET,
+        )
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         check_results = check_e2e_result(
@@ -414,7 +423,10 @@ async def e2e_eval_stream_endpoint():
 
 @app.get("/")
 async def root():
-    return FileResponse(str(_STATIC_DIR / "index.html"))
+    return FileResponse(
+        str(_STATIC_DIR / "index.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

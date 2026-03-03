@@ -6,22 +6,33 @@ from pathlib import Path
 
 import tiktoken
 
+from functools import lru_cache
+
+from openai import AsyncOpenAI
+
 from app.config import get_settings
-from app.services.embeddings import get_async_openai_client
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
 _encoder = tiktoken.get_encoding("cl100k_base")
 
-CONTEXT_TOKEN_BUDGET = 2000
+
+@lru_cache
+def _get_generation_client() -> AsyncOpenAI:
+    settings = get_settings()
+    return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=1)
+
+CONTEXT_TOKEN_BUDGET = 3000
 
 
 def _count_tokens(text: str) -> int:
     return len(_encoder.encode(text))
 
 
-def _assemble_context(chunks: list[dict], budget: int = CONTEXT_TOKEN_BUDGET) -> str:
+def _assemble_context(
+    chunks: list[dict], budget: int = CONTEXT_TOKEN_BUDGET,
+) -> str:
     """Fit max complete chunks within token budget."""
     if not chunks:
         return ""
@@ -40,6 +51,19 @@ def _assemble_context(chunks: list[dict], budget: int = CONTEXT_TOKEN_BUDGET) ->
         total_tokens += chunk_tokens
 
     return "\n\n---\n\n".join(context_parts)
+
+
+def _strip_markdown(text: str) -> str:
+    """Strip markdown formatting from LLM output."""
+    # Headers: ### Foo → Foo
+    text = re.sub(r'^#{1,4}\s+', '', text, flags=re.MULTILINE)
+    # Bold/italic: **foo** or *foo* → foo
+    text = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', text)
+    # Bullet lists: - foo or * foo → foo
+    text = re.sub(r'^[\s]*[-*]\s+', '', text, flags=re.MULTILINE)
+    # Numbered lists: 1. foo → foo
+    text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
+    return text
 
 
 def _extract_citations_from_text(text: str) -> list[str]:
@@ -65,9 +89,14 @@ def _build_citation_fallback(chunks: list[dict]) -> list[str]:
     return list(dict.fromkeys(citations))  # dedupe preserving order
 
 
-def _build_messages(query: str, chunks: list[dict], capability: str | None = None):
+def _build_messages(
+    query: str,
+    chunks: list[dict],
+    capability: str | None = None,
+    context_budget: int = CONTEXT_TOKEN_BUDGET,
+):
     """Build the messages list for the LLM call."""
-    context = _assemble_context(chunks)
+    context = _assemble_context(chunks, budget=context_budget)
 
     if capability and capability in CAPABILITIES:
         system_prompt = CAPABILITIES[capability]
@@ -92,10 +121,17 @@ async def generate_answer(
     query: str,
     chunks: list[dict],
     capability: str | None = None,
+    max_tokens: int = 1500,
+    context_budget: int = CONTEXT_TOKEN_BUDGET,
+    track_ttft: bool = False,
 ) -> dict:
-    """Generate an answer using retrieved context chunks."""
+    """Generate an answer using retrieved context chunks.
+
+    When track_ttft=True, uses streaming to measure time-to-first-token
+    (returned as ttft_ms in the result dict).
+    """
     settings = get_settings()
-    client = get_async_openai_client()
+    client = _get_generation_client()
 
     if not chunks:
         return {
@@ -105,22 +141,35 @@ async def generate_answer(
             "token_usage": {},
         }
 
-    messages = _build_messages(query, chunks, capability)
+    messages = _build_messages(query, chunks, capability, context_budget)
 
-    response = await client.chat.completions.create(
-        model=settings.CHAT_MODEL,
-        messages=messages,
-        temperature=0.1,
-        max_tokens=800,
-    )
+    if track_ttft:
+        answer_text, token_usage, ttft_ms = await _generate_with_ttft(
+            client, settings.CHAT_MODEL, messages, max_tokens,
+        )
+    else:
+        response = await client.chat.completions.create(
+            model=settings.CHAT_MODEL,
+            messages=messages,
+            temperature=0.1,
+            max_tokens=max_tokens,
+        )
 
-    answer_text = ""
-    if len(response.choices) > 0:
-        message = response.choices[0].message
-        if message.content is not None:
-            answer_text = message.content
+        answer_text = ""
+        if len(response.choices) > 0:
+            message = response.choices[0].message
+            if message.content is not None:
+                answer_text = message.content
 
-    # Extract citations from the answer
+        token_usage = {}
+        if response.usage is not None:
+            token_usage = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+        ttft_ms = None
+
     citations = _extract_citations_from_text(answer_text)
 
     # Citation enforcement fallback
@@ -129,26 +178,58 @@ async def generate_answer(
         if citations:
             answer_text += "\n\nSources: " + ", ".join(citations)
 
-    token_usage = {}
-    if response.usage is not None:
-        token_usage = {
-            "prompt_tokens": response.usage.prompt_tokens,
-            "completion_tokens": response.usage.completion_tokens,
-            "total_tokens": response.usage.total_tokens,
-        }
-
-    return {
+    result = {
         "answer": answer_text,
         "citations": citations,
         "model": settings.CHAT_MODEL,
         "token_usage": token_usage,
     }
+    if ttft_ms is not None:
+        result["ttft_ms"] = ttft_ms
+    return result
+
+
+async def _generate_with_ttft(client, model, messages, max_tokens):
+    """Stream a completion and measure time-to-first-token."""
+    import time
+
+    t0 = time.time()
+    stream = await client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=0.1,
+        max_tokens=max_tokens,
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+
+    accumulated = []
+    token_usage = {}
+    ttft_ms = None
+
+    async for chunk in stream:
+        if chunk.usage is not None:
+            token_usage = {
+                "prompt_tokens": chunk.usage.prompt_tokens,
+                "completion_tokens": chunk.usage.completion_tokens,
+                "total_tokens": chunk.usage.total_tokens,
+            }
+        if chunk.choices:
+            delta = chunk.choices[0].delta
+            if delta.content:
+                if ttft_ms is None:
+                    ttft_ms = round((time.time() - t0) * 1000, 1)
+                accumulated.append(delta.content)
+
+    return "".join(accumulated), token_usage, ttft_ms
 
 
 async def generate_answer_stream(
     query: str,
     chunks: list[dict],
     capability: str | None = None,
+    max_tokens: int = 1500,
+    context_budget: int = CONTEXT_TOKEN_BUDGET,
 ):
     """Stream answer tokens, yielding dicts for each event.
 
@@ -157,7 +238,7 @@ async def generate_answer_stream(
         {"type": "done", "citations": list, "token_usage": dict} — final
     """
     settings = get_settings()
-    client = get_async_openai_client()
+    client = _get_generation_client()
 
     if not chunks:
         yield {
@@ -167,13 +248,13 @@ async def generate_answer_stream(
         yield {"type": "done", "citations": [], "token_usage": {}}
         return
 
-    messages = _build_messages(query, chunks, capability)
+    messages = _build_messages(query, chunks, capability, context_budget)
 
     stream = await client.chat.completions.create(
         model=settings.CHAT_MODEL,
         messages=messages,
         temperature=0.1,
-        max_tokens=800,
+        max_tokens=max_tokens,
         stream=True,
         stream_options={"include_usage": True},
     )

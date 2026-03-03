@@ -4,6 +4,96 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LegacyLens — LAPACK Code Explorer</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/monokai.min.css">
+    <style>
+        /* Monokai color overrides for Fortran variety */
+        .hljs-keyword { color: #f92672; }           /* pink — control flow */
+        .hljs-type { color: #66d9ef; font-style: italic; }  /* blue italic — types */
+        .hljs-string { color: #e6db74; }             /* yellow — strings */
+        .hljs-number { color: #ae81ff; }             /* purple — numbers */
+        .hljs-built_in { color: #66d9ef; }           /* blue — intrinsics */
+        .hljs-comment { color: #75715e; font-style: italic; } /* grey italic */
+        .hljs-title.function_ { color: #a6e22e; font-weight: 700; } /* green bold — BLAS/LAPACK */
+        .hljs-variable { color: #fd971f; }           /* orange — common params */
+        .hljs-variable.language_ { color: #fd971f; font-style: italic; } /* orange italic — M,N,K */
+        .hljs-literal { color: #ae81ff; }            /* purple — .TRUE./.FALSE. */
+        .hljs-operator { color: #f92672; }           /* pink — .EQ. etc */
+        .hljs-meta { color: #75715e; }               /* grey — continuation */
+        /* Line numbers */
+        .hljs-ln-numbers {
+            user-select: none; text-align: right; color: #555;
+            border-right: 1px solid #3e3e3e; padding-right: 0.5rem;
+            margin-right: 0.5rem; min-width: 2rem; display: inline-block;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/fortran.min.js"></script>
+    <script>
+    // Enhanced Fortran grammar for LAPACK-style fixed-form code
+    (function(){
+        hljs.registerLanguage('fortran', function(hljs) {
+            return {
+                case_insensitive: true,
+                keywords: {
+                    keyword: 'subroutine function program end if then else elseif endif ' +
+                        'do enddo while continue goto return stop call ' +
+                        'dimension parameter data implicit none save common equivalence ' +
+                        'external intrinsic intent in out inout ' +
+                        'read write format print open close inquire rewind backspace ' +
+                        'allocate deallocate module use contains interface ' +
+                        'select case default exit cycle where elsewhere forall',
+                    type: 'integer real double precision complex character logical',
+                    literal: '.TRUE. .FALSE. .true. .false.',
+                    built_in: 'max min abs sign sqrt mod int dble real cmplx conjg ' +
+                        'iand ior ieor not ishft ibset ibclr btest ' +
+                        'len trim index char ichar lge lgt lle llt ' +
+                        'amax1 amin1 dmax1 dmin1 max0 min0 ' +
+                        'dsqrt dabs dlog dexp dsin dcos dtan dasin dacos datan datan2 ' +
+                        'lsame xerbla ilaenv'
+                },
+                contains: [
+                    { className: 'comment', begin: /^[Cc*]/m, end: /$/m },
+                    { className: 'comment', begin: /!/, end: /$/m },
+                    { className: 'string', begin: /'/, end: /'/ },
+                    { className: 'string', begin: /"/, end: /"/ },
+                    {
+                        className: 'number',
+                        variants: [
+                            { begin: /\b\d+\.\d*([edED][+-]?\d+)?/i },
+                            { begin: /\b\.\d+([edED][+-]?\d+)?/i },
+                            { begin: /\b\d+([edED][+-]?\d+)/i },
+                            { begin: /\b\d+\b/ }
+                        ]
+                    },
+                    {
+                        className: 'operator',
+                        begin: /\.(EQ|NE|LT|GT|LE|GE|AND|OR|NOT|EQV|NEQV)\./i
+                    },
+                    {
+                        className: 'title.function',
+                        begin: /\b[SDCZ](GEMM|GEMV|TRSM|TRSV|SYRK|SYR2K|SYMM|AXPY|COPY|SCAL|SWAP|DOT|NRM2|ASUM|AMAX|ROTG|ROT|GETRF|GETRS|GETRI|GESV|GESVD|GELS|GEQRF|ORGQR|POTRF|POTRS|POSV|SYEV|HEEV|GEEV|TRTRS|LACPY|LASET|LASCL|LANGE|LANSY|LASWP|LAMCH|LASRT|LAPY2|LATMS|GEQR2|LARF|LARFG|LARFB|LARFT|GETF2|POTF2|TRTRI|LAUUM)\b/i
+                    },
+                    {
+                        className: 'title.function',
+                        begin: /(?<=CALL\s+)\w+/i
+                    },
+                    {
+                        className: 'variable',
+                        begin: /\b(INFO|LDA|LDB|LDC|LWORK|WORK|IPIV|NRHS|INCX|INCY|TRANS|UPLO|DIAG|SIDE|ALPHA|BETA|NORM|ANORM|RCOND|RWORK|IWORK|LDVL|LDVR|VL|VR|WR|WI|SCALE|ABNRM)\b/i
+                    },
+                    {
+                        className: 'variable.language',
+                        begin: /\b[MNK]\b/
+                    },
+                    {
+                        className: 'meta',
+                        begin: /^\s{5}[&$+]/m
+                    }
+                ]
+            };
+        });
+    })();
+    </script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -96,12 +186,14 @@
             font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85em;
         }
         .answer-md pre {
-            background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 6px;
-            padding: 0.75rem; margin: 0.5rem 0; overflow-x: auto;
+            background: #272822; border: 1px solid #3e3e3e; border-radius: 6px;
+            padding: 0; margin: 0.5rem 0; overflow-x: auto;
         }
         .answer-md pre code {
-            background: none; padding: 0; font-size: 0.85rem; line-height: 1.5;
+            background: transparent; padding: 0.75rem; display: block;
+            font-size: 0.85rem; line-height: 1.5; white-space: pre;
         }
+        .answer-md pre code.hljs { padding: 0.75rem; background: transparent; }
         .answer-md strong { color: #f8f8f2; }
         .answer-md hr { border: none; border-top: 1px solid #3e3e3e; margin: 0.75rem 0; }
         .answer-md .math-block {
@@ -149,12 +241,45 @@
             display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
             font-size: 0.72rem; font-weight: 600;
         }
+        .chunks-layout {
+            display: flex; gap: 0; border: 1px solid #3e3e3e; border-radius: 6px;
+            overflow: hidden; min-height: 260px; max-height: 420px;
+        }
+        .chunks-sidebar {
+            width: 240px; min-width: 240px; overflow-y: auto;
+            border-right: 1px solid #3e3e3e; background: #1e1e1e;
+        }
+        .chunk-item {
+            padding: 0.5rem 0.6rem; cursor: pointer; border-left: 3px solid transparent;
+            border-bottom: 1px solid #2a2a2a; transition: background 0.15s, border-color 0.15s;
+        }
+        .chunk-item:hover { background: #2a2a2a; }
+        .chunk-item.active { background: #2a2a2a; border-left-color: #a6e22e; }
+        .chunk-item .chunk-rank { color: #888; font-size: 0.7rem; margin-right: 0.3rem; }
+        .chunk-item .chunk-file { font-family: monospace; font-size: 0.78rem; color: #e0e0e0; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .chunk-item .chunk-meta { font-size: 0.7rem; color: #888; margin-top: 0.15rem; display: flex; align-items: center; gap: 0.4rem; }
+        .chunk-viewer {
+            flex: 1; overflow-y: auto; background: #272822; position: relative;
+        }
+        .chunk-viewer pre {
+            margin: 0; background: transparent; border: none; padding: 0;
+        }
+        .chunk-viewer code {
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.75rem; line-height: 1.5; background: transparent;
+            padding: 0.6rem; display: block; white-space: pre;
+        }
+        .chunk-viewer-placeholder {
+            color: #666; font-style: italic; padding: 2rem; text-align: center;
+            display: flex; align-items: center; justify-content: center; height: 100%;
+        }
         .badge-name { background: #66d9ef22; color: #66d9ef; }
         .badge-expansion { background: #ae81ff22; color: #ae81ff; }
         .badge-call-graph { background: #fd971f22; color: #fd971f; }
         .badge-vector { background: #a6e22e22; color: #a6e22e; }
         .obs-stats {
             display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #888;
+            justify-content: space-between;
         }
         .obs-stats .stat { display: flex; flex-direction: column; }
         .obs-stats .stat-value { color: #d4d4d4; font-weight: 600; font-size: 0.9rem; }
@@ -320,21 +445,18 @@
             <h2 class="panel-title">Observability</h2>
             <div id="obs-empty" class="obs-empty">Run a query to see details</div>
             <div class="obs-panel" id="obs-content" style="display:none">
-                <h4>Timing</h4>
-                <div class="obs-stats" id="obs-timing"></div>
-                <h4>Token Usage</h4>
-                <div class="obs-stats" id="obs-tokens"></div>
+                <div class="obs-stats" id="obs-timing-tokens"></div>
                 <div id="obs-expansion-section" style="display:none;">
                     <h4>Query Expansion</h4>
                     <div class="expansion-names" id="obs-expansion"></div>
                 </div>
                 <h4>Retrieved Chunks</h4>
-                <table>
-                    <thead>
-                        <tr><th>#</th><th>File</th><th>Routine</th><th>Score</th><th>Match</th></tr>
-                    </thead>
-                    <tbody id="obs-chunks"></tbody>
-                </table>
+                <div class="chunks-layout">
+                    <div class="chunks-sidebar" id="obs-chunks"></div>
+                    <div class="chunk-viewer" id="chunk-viewer">
+                        <div class="chunk-viewer-placeholder">Select a chunk to view source</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -463,6 +585,15 @@
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuery(); }
         });
 
+        function addLineNumbers(el) {
+            const lines = el.innerHTML.split('\n');
+            const pad = String(lines.length).length;
+            el.innerHTML = lines.map((line, i) => {
+                const num = String(i + 1).padStart(pad, ' ');
+                return `<span class="hljs-ln-numbers">${num}</span>${line}`;
+            }).join('\n');
+        }
+
         function badgeClass(matchType) {
             const map = { name: "badge-name", expansion: "badge-expansion", call_graph: "badge-call-graph", vector: "badge-vector" };
             return map[matchType] || "badge-vector";
@@ -483,8 +614,10 @@
             html = html.replace(/\\\(([^)]*?)\\\)/g, (_, expr) => `<span class="math-inline">${cleanLatex(expr)}</span>`);
 
             // Code blocks (``` ... ```)
-            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-                `<pre><code>${code.replace(/\n$/, '')}</code></pre>`);
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+                const cls = lang ? `language-${lang}` : "language-fortran";
+                return `<pre><code class="${cls}">${code.replace(/\n$/, '')}</code></pre>`;
+            });
             // Headers
             html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
             html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
@@ -559,18 +692,21 @@
                 .trim();
         }
 
-        function renderObservability(data) {
-            const timing = data.timing || {};
-            document.getElementById("obs-timing").innerHTML = [
-                ["Retrieval", timing.retrieval_ms], ["Generation", timing.generation_ms], ["Total", timing.total_ms],
+        let _lastTiming = {}, _lastTokens = {};
+        function _renderTimingTokens() {
+            const t = _lastTiming, tok = _lastTokens;
+            const timing = [
+                ["Retrieval", t.retrieval_ms], ["Generation", t.generation_ms], ["Total", t.total_ms],
             ].map(([l, v]) => `<div class="stat"><span class="stat-value">${v != null ? v.toFixed(0)+'ms' : '—'}</span><span>${l}</span></div>`).join("");
-
-            const tok = data.token_usage || {};
-            document.getElementById("obs-tokens").innerHTML = [
-                ["Prompt", tok.prompt_tokens], ["Completion", tok.completion_tokens], ["Total", tok.total_tokens],
+            const tokens = [
+                ["Prompt", tok.prompt_tokens], ["Completion", tok.completion_tokens], ["Total Tok", tok.total_tokens],
             ].map(([l, v]) => `<div class="stat"><span class="stat-value">${v != null ? v.toLocaleString() : '—'}</span><span>${l}</span></div>`).join("");
+            document.getElementById("obs-timing-tokens").innerHTML = timing + tokens;
+        }
+        function updateTiming(timing) { _lastTiming = timing; _renderTimingTokens(); }
+        function updateTokens(tok) { _lastTokens = tok; _renderTimingTokens(); }
 
-            const rd = data.retrieval_details || {};
+        function renderChunks(rd) {
             const expSection = document.getElementById("obs-expansion-section");
             if (rd.expanded_names && rd.expanded_names.length > 0) {
                 expSection.style.display = "block";
@@ -578,9 +714,36 @@
             } else { expSection.style.display = "none"; }
 
             const chunks = (rd.chunks || []);
-            document.getElementById("obs-chunks").innerHTML = chunks.map(c =>
-                `<tr><td>${c.rank}</td><td style="font-family:monospace;font-size:0.78rem">${c.file_name}</td><td style="font-family:monospace;font-size:0.78rem">${c.routine_name}</td><td>${c.score.toFixed(4)}</td><td><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></td></tr>`
-            ).join("");
+            const sidebar = document.getElementById("obs-chunks");
+            const viewer = document.getElementById("chunk-viewer");
+            sidebar.innerHTML = "";
+
+            function selectChunk(chunk, item) {
+                sidebar.querySelectorAll(".chunk-item").forEach(el => el.classList.remove("active"));
+                item.classList.add("active");
+                const pre = document.createElement("pre");
+                const code = document.createElement("code");
+                code.className = "language-fortran";
+                code.textContent = chunk.text || "";
+                viewer.innerHTML = "";
+                pre.appendChild(code);
+                viewer.appendChild(pre);
+                hljs.highlightElement(code);
+                addLineNumbers(code);
+            }
+
+            chunks.forEach((c, i) => {
+                const item = document.createElement("div");
+                item.className = "chunk-item";
+                item.innerHTML = `<span class="chunk-file"><span class="chunk-rank">#${c.rank}</span>${c.file_name}</span><div class="chunk-meta"><span style="font-family:monospace">${c.routine_name}</span><span>${c.score.toFixed(4)}</span><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></div>`;
+                item.addEventListener("click", () => selectChunk(c, item));
+                sidebar.appendChild(item);
+                if (i === 0) selectChunk(c, item);
+            });
+
+            if (chunks.length === 0) {
+                viewer.innerHTML = '<div class="chunk-viewer-placeholder">No chunks retrieved</div>';
+            }
         }
 
         function parseSSE(text) {
@@ -693,7 +856,7 @@
                     <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
                     <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
-                    <span class="eval-ms">${data.latency_ms.toFixed(0)}ms</span>
+                    <span class="eval-ms">${data.latency_ms.toFixed(0)}ms${data.ttft_ms != null ? ` <span style="color:#66d9ef">ttft ${data.ttft_ms.toFixed(0)}ms</span>` : ""}</span>
                 </div>
                 <div class="eval-details">
                     <div class="detail-section">
@@ -727,9 +890,8 @@
             submitBtn.disabled = true;
             spinner.classList.add("visible");
             resultDiv.classList.remove("visible");
-            answerRaw.textContent = "";
-            answerRaw.style.display = "block";
-            answerMd.style.display = "none";
+            answerRaw.style.display = "none";
+            answerMd.style.display = "block";
             answerMd.innerHTML = "";
             citationsDiv.innerHTML = "";
             citationsBox.style.display = "none";
@@ -745,22 +907,22 @@
                         resultDiv.classList.add("visible");
                         document.getElementById("obs-empty").style.display = "none";
                         document.getElementById("obs-content").style.display = "block";
-                        renderObservability({ retrieval_details: data.retrieval_details, timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null }, token_usage: {} });
+                        updateTiming({ retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null });
+                        updateTokens({});
+                        renderChunks(data.retrieval_details);
                     } else if (event === "token") {
                         fullAnswer += data.token;
-                        answerRaw.textContent = fullAnswer;
-                    } else if (event === "done") {
-                        // Swap raw text for rendered markdown
-                        answerRaw.style.display = "none";
                         answerMd.innerHTML = renderMarkdown(fullAnswer);
-                        answerMd.style.display = "block";
-
+                    } else if (event === "done") {
+                        answerMd.innerHTML = renderMarkdown(fullAnswer);
+                        answerMd.querySelectorAll("pre code").forEach(el => { hljs.highlightElement(el); });
                         if (data.citations && data.citations.length > 0) {
                             citationsBox.style.display = "block";
                             data.citations.forEach(c => { const s = document.createElement("span"); s.textContent = c; citationsDiv.appendChild(s); });
                         }
                         document.getElementById("meta").textContent = `Latency: ${data.timing.total_ms}ms`;
-                        renderObservability({ retrieval_details: null, timing: data.timing, token_usage: data.token_usage });
+                        updateTiming(data.timing);
+                        updateTokens(data.token_usage);
                     }
                 });
             } catch (err) {

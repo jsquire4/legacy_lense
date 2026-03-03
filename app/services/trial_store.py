@@ -1,12 +1,15 @@
 """SQLite-backed storage for model comparison trial results."""
 
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Resolve relative to the project root (parent of the app/ package)
+# Use /tmp for environments where the app dir may not be writable (e.g. Railway),
+# fall back to project-local data/ for local development.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-DEFAULT_DB_PATH = _PROJECT_ROOT / "data" / "trials.db"
+_LOCAL_DB = _PROJECT_ROOT / "data" / "trials.db"
+DEFAULT_DB_PATH = _LOCAL_DB if _LOCAL_DB.parent.exists() and os.access(str(_LOCAL_DB.parent), os.W_OK) else Path("/tmp/data/trials.db")
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS trials (

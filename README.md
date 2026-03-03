@@ -5,7 +5,7 @@ A RAG application for querying the LAPACK Fortran codebase via natural language.
 ## Features
 
 - **Hybrid retrieval**: name matching, LLM query expansion, call-graph following, and vector similarity
-- **5 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping, impact analysis
+- **6 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping, impact analysis, business rule extraction
 - **Citation enforcement**: every answer includes file:line references
 - **Observability**: per-query timing, token usage, chunk scores, and retrieval strategy details
 - **Structured logging**: rotating JSON log files in `logs/`
@@ -72,7 +72,7 @@ General-purpose query.
 Response includes `answer`, `citations`, `latency_ms`, `retrieval_details`, `token_usage`, and `timing`.
 
 ### `POST /api/capabilities/{capability}`
-Specialized query. Capabilities: `explain_code`, `generate_docs`, `detect_patterns`, `map_dependencies`, `impact_analysis`.
+Specialized query. Capabilities: `explain_code`, `generate_docs`, `detect_patterns`, `map_dependencies`, `impact_analysis`, `extract_business_rules`.
 
 Same request/response format as `/api/query`.
 

@@ -19,7 +19,7 @@ User Query → FastAPI → Hybrid Retrieval → Context Assembly → LLM Generat
 5. **Vector Store** (`app/services/vector_store.py`) — Manages Qdrant collection operations
 6. **Retrieval Service** (`app/services/retrieval.py`) — Hybrid retrieval: name match + query expansion + call-graph + vector
 7. **Generation Service** (`app/services/generation.py`) — LLM answer generation with citation enforcement
-8. **Capabilities** (`app/services/capabilities.py`) — 5 specialized code understanding prompts
+8. **Capabilities** (`app/services/capabilities.py`) — 6 specialized code understanding prompts
 9. **Logging** (`app/logging_config.py`) — Structured JSON logging with rotating file handler
 
 ## Key Design Decisions

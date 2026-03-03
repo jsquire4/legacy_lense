@@ -8,51 +8,70 @@
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #0d1117; color: #c9d1d9;
+            background: #1e1e1e; color: #d4d4d4;
             min-height: 100vh; padding: 2rem 1rem;
         }
-        h1 { color: #58a6ff; margin-bottom: 0.25rem; font-size: 1.8rem; text-align: center; }
-        .subtitle { color: #8b949e; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center; }
-        .container { width: 100%; max-width: 900px; margin: 0 auto; }
+        h1 {
+            color: #f8f8f2; margin-bottom: 0.15rem; font-size: 1.9rem; text-align: center;
+            font-weight: 700; letter-spacing: -0.02em;
+        }
+        h1 span { color: #a6e22e; }
+        .subtitle { color: #888; margin-bottom: 1.75rem; font-size: 0.9rem; text-align: center; letter-spacing: 0.02em; }
+        .container { width: 100%; max-width: 920px; margin: 0 auto; }
 
         /* Panels */
         .panel {
-            background: #161b22; border: 1px solid #30363d;
-            border-radius: 6px; padding: 1.25rem; margin-bottom: 1.5rem;
+            background: #272727; border: 1px solid #3e3e3e;
+            border-radius: 8px; padding: 1.25rem; margin-bottom: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
         .panel-title {
-            color: #58a6ff; font-size: 0.95rem; font-weight: 700;
+            color: #e0e0e0; font-size: 0.9rem; font-weight: 700;
             margin-bottom: 0.75rem; padding-bottom: 0.5rem;
-            border-bottom: 1px solid #30363d;
+            border-bottom: 1px solid #3e3e3e;
+            letter-spacing: 0.01em;
         }
 
         /* Query area */
-        .input-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+        .input-group { margin-bottom: 0.6rem; }
         textarea {
-            flex: 1; padding: 0.75rem; border: 1px solid #30363d;
-            background: #161b22; color: #c9d1d9; border-radius: 6px;
-            font-size: 0.95rem; resize: vertical; min-height: 60px;
-            font-family: inherit;
+            width: 100%; padding: 0.6rem 0.75rem; border: 1px solid #3e3e3e;
+            background: #1e1e1e; color: #d4d4d4; border-radius: 6px;
+            font-size: 0.95rem; resize: vertical; min-height: 52px;
+            font-family: inherit; transition: border-color 0.15s;
         }
-        textarea:focus { outline: none; border-color: #58a6ff; }
+        textarea:focus { outline: none; border-color: #a6e22e; box-shadow: 0 0 0 2px rgba(166,226,46,0.15); }
         button {
-            padding: 0.75rem 1.5rem; background: #238636; color: #fff;
+            padding: 0.4rem 1.25rem; background: #238636; color: #fff;
             border: none; border-radius: 6px; cursor: pointer;
-            font-size: 0.95rem; font-weight: 600; white-space: nowrap;
+            font-size: 0.85rem; font-weight: 600; white-space: nowrap;
+            transition: background 0.15s; flex-shrink: 0;
         }
         button:hover { background: #2ea043; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .capabilities { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-        .cap-btn {
-            padding: 0.4rem 0.8rem; background: #21262d; color: #8b949e;
-            border: 1px solid #30363d; border-radius: 20px; cursor: pointer; font-size: 0.8rem;
+        .query-box {
+            background: #272727; border: 1px solid #3e3e3e; border-radius: 8px;
+            padding: 0.75rem; margin-bottom: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
         }
-        .cap-btn.active { background: #1f6feb; color: #fff; border-color: #1f6feb; }
-        .cap-btn:hover { border-color: #58a6ff; }
+        .query-bottom {
+            display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
+        }
+        .capabilities { display: flex; gap: 0.35rem; flex: 1; flex-wrap: wrap; }
+        .cap-btn {
+            padding: 0.3rem 0.65rem; background: transparent; color: #999;
+            border: 1px solid #3e3e3e; border-radius: 4px; cursor: pointer; font-size: 0.75rem;
+            transition: all 0.15s;
+        }
+        .cap-btn.active { background: #49483e; color: #a6e22e; border-color: #a6e22e; }
+        .cap-btn:hover:not(.active) { border-color: #555; color: #d4d4d4; }
 
         .result {
-            background: #161b22; border: 1px solid #30363d;
-            border-radius: 6px; padding: 1.25rem; margin-top: 1rem; display: none;
+            background: #272727; border: 1px solid #3e3e3e;
+            border-radius: 8px; padding: 1.25rem; margin-top: 1rem; margin-bottom: 1.5rem;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03);
+            border-top: 2px solid #a6e22e;
         }
         .result.visible { display: block; }
         .result pre {
@@ -60,46 +79,90 @@
             font-family: 'Cascadia Code', 'Fira Code', monospace;
             font-size: 0.9rem; line-height: 1.5;
         }
-        .citations { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #30363d; }
-        .citations h3 { color: #58a6ff; font-size: 0.85rem; margin-bottom: 0.4rem; }
+        .result .answer-md {
+            font-size: 0.9rem; line-height: 1.6; color: #d4d4d4;
+        }
+        .answer-md h1, .answer-md h2, .answer-md h3, .answer-md h4 {
+            color: #f8f8f2; margin: 1rem 0 0.4rem; font-weight: 600;
+        }
+        .answer-md h1 { font-size: 1.2rem; }
+        .answer-md h2 { font-size: 1.1rem; }
+        .answer-md h3 { font-size: 1rem; }
+        .answer-md p { margin: 0.4rem 0; }
+        .answer-md ul, .answer-md ol { margin: 0.4rem 0 0.4rem 1.5rem; }
+        .answer-md li { margin: 0.15rem 0; }
+        .answer-md code {
+            background: #333; padding: 0.15rem 0.35rem; border-radius: 3px;
+            font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85em;
+        }
+        .answer-md pre {
+            background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 6px;
+            padding: 0.75rem; margin: 0.5rem 0; overflow-x: auto;
+        }
+        .answer-md pre code {
+            background: none; padding: 0; font-size: 0.85rem; line-height: 1.5;
+        }
+        .answer-md strong { color: #f8f8f2; }
+        .answer-md hr { border: none; border-top: 1px solid #3e3e3e; margin: 0.75rem 0; }
+        .answer-md .math-block {
+            background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 6px;
+            padding: 0.6rem 0.85rem; margin: 0.5rem 0; font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.9rem; color: #f8f8f2; text-align: center;
+        }
+        .answer-md .math-inline {
+            font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.88em; color: #f8f8f2;
+        }
+        .answer-md .param-def {
+            padding: 0.35rem 0; border-bottom: 1px solid #3e3e3e;
+            margin: 0.1rem 0;
+        }
+        .answer-md .param-name {
+            font-family: 'Cascadia Code', 'Fira Code', monospace; font-weight: 700;
+            color: #66d9ef; font-size: 0.88rem; margin-right: 0.5rem;
+        }
+        .answer-md .param-type {
+            color: #8b949e; font-size: 0.82rem;
+        }
+        .citations { margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #3e3e3e; }
+        .citations h3 { color: #e6db74; font-size: 0.85rem; margin-bottom: 0.4rem; }
         .citations span {
-            display: inline-block; background: #21262d; padding: 0.2rem 0.5rem;
+            display: inline-block; background: #333; padding: 0.2rem 0.5rem;
             border-radius: 4px; font-size: 0.8rem; margin: 0.15rem; font-family: monospace;
         }
         .meta { color: #8b949e; font-size: 0.8rem; margin-top: 0.5rem; }
-        .spinner { display: none; color: #58a6ff; margin: 1rem 0; }
+        .spinner { display: none; color: #a6e22e; margin: 1rem 0; }
         .spinner.visible { display: block; }
-        .error { color: #f85149; }
+        .error { color: #f92672; }
 
         /* Observability panel */
-        .obs-empty { color: #8b949e; font-size: 0.82rem; font-style: italic; padding: 0.5rem 0; }
-        .obs-panel h4 { color: #58a6ff; font-size: 0.82rem; margin: 0.6rem 0 0.3rem; }
+        .obs-empty { color: #888; font-size: 0.82rem; font-style: italic; padding: 0.5rem 0; }
+        .obs-panel h4 { color: #e6db74; font-size: 0.82rem; margin: 0.6rem 0 0.3rem; }
         .obs-panel table {
             width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 0.5rem;
         }
         .obs-panel th {
-            text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #30363d;
-            color: #8b949e; font-weight: 600;
+            text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #3e3e3e;
+            color: #888; font-weight: 600;
         }
-        .obs-panel td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #21262d; }
+        .obs-panel td { padding: 0.3rem 0.5rem; border-bottom: 1px solid #333; }
         .obs-panel .badge {
             display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
             font-size: 0.72rem; font-weight: 600;
         }
-        .badge-name { background: #1f6feb33; color: #58a6ff; }
-        .badge-expansion { background: #8957e533; color: #bc8cff; }
-        .badge-call-graph { background: #f0883e33; color: #f0883e; }
-        .badge-vector { background: #23863633; color: #3fb950; }
+        .badge-name { background: #66d9ef22; color: #66d9ef; }
+        .badge-expansion { background: #ae81ff22; color: #ae81ff; }
+        .badge-call-graph { background: #fd971f22; color: #fd971f; }
+        .badge-vector { background: #a6e22e22; color: #a6e22e; }
         .obs-stats {
-            display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #8b949e;
+            display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: #888;
         }
         .obs-stats .stat { display: flex; flex-direction: column; }
-        .obs-stats .stat-value { color: #c9d1d9; font-weight: 600; font-size: 0.9rem; }
+        .obs-stats .stat-value { color: #d4d4d4; font-weight: 600; font-size: 0.9rem; }
         .expansion-names {
             display: flex; gap: 0.3rem; flex-wrap: wrap; margin-bottom: 0.5rem;
         }
         .expansion-names span {
-            background: #8957e522; color: #bc8cff; padding: 0.15rem 0.4rem;
+            background: #ae81ff22; color: #ae81ff; padding: 0.15rem 0.4rem;
             border-radius: 3px; font-size: 0.75rem; font-family: monospace;
         }
 
@@ -108,40 +171,45 @@
             display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
         }
         .eval-controls button { padding: 0.5rem 1rem; font-size: 0.85rem; }
-        .eval-status { color: #8b949e; font-size: 0.8rem; }
+        .eval-status { color: #888; font-size: 0.8rem; }
         .eval-metrics { margin-bottom: 0.75rem; }
         .eval-rows { max-height: 600px; overflow-y: auto; }
 
         /* Eval accordion rows */
-        .eval-item { border-bottom: 1px solid #21262d; }
+        .eval-item { border-bottom: 1px solid #333; }
         .eval-header {
-            display: grid; grid-template-columns: 1fr auto auto auto;
+            display: grid; grid-template-columns: auto 1fr auto auto auto;
             gap: 0.5rem; padding: 0.5rem 0.25rem; font-size: 0.78rem;
             align-items: center; cursor: pointer; user-select: none;
         }
-        .eval-header:hover { background: #21262d44; }
+        .eval-header:hover { background: #33333366; }
+        .eval-chevron {
+            color: #888; font-size: 0.6rem; transition: transform 0.2s ease;
+            width: 1em; text-align: center;
+        }
+        .eval-item.expanded .eval-chevron { transform: rotate(90deg); }
         .eval-header .eval-q {
-            color: #c9d1d9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            color: #d4d4d4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
         }
         .eval-header .eval-score { font-family: monospace; font-weight: 600; }
-        .eval-score.pass { color: #3fb950; }
-        .eval-score.fail { color: #f85149; }
-        .eval-header .eval-ms { color: #8b949e; font-size: 0.72rem; }
+        .eval-score.pass { color: #a6e22e; }
+        .eval-score.fail { color: #f92672; }
+        .eval-header .eval-ms { color: #888; font-size: 0.72rem; }
         .eval-cap {
             font-size: 0.68rem; padding: 0.1rem 0.35rem; border-radius: 3px;
-            background: #1f6feb33; color: #58a6ff; font-weight: 600; white-space: nowrap;
+            background: #66d9ef22; color: #66d9ef; font-weight: 600; white-space: nowrap;
         }
-        .eval-cap.cap-null { background: #8b949e22; color: #8b949e; }
+        .eval-cap.cap-null { background: #88888822; color: #888; }
 
         .eval-details {
             display: none; padding: 0.5rem 0.25rem 0.75rem;
-            font-size: 0.78rem; border-top: 1px solid #21262d;
-            background: #0d111766;
+            font-size: 0.78rem; border-top: 1px solid #333;
+            background: #1e1e1e66;
         }
-        .eval-details.open { display: block; }
+        .eval-item.expanded .eval-details { display: block; }
         .eval-details .detail-section { margin-bottom: 0.5rem; }
         .eval-details .detail-label {
-            color: #8b949e; font-size: 0.72rem; font-weight: 600;
+            color: #888; font-size: 0.72rem; font-weight: 600;
             text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.2rem;
         }
         .eval-details .file-list {
@@ -151,83 +219,95 @@
             font-family: monospace; font-size: 0.72rem;
             padding: 0.1rem 0.4rem; border-radius: 3px;
         }
-        .file-tag.found { background: #23863633; color: #3fb950; }
-        .file-tag.missing { background: #f8514933; color: #f85149; }
-        .file-tag.retrieved { background: #21262d; color: #c9d1d9; }
+        .file-tag.found { background: #a6e22e22; color: #a6e22e; }
+        .file-tag.missing { background: #f9267222; color: #f92672; }
+        .file-tag.retrieved { background: #333; color: #d4d4d4; }
         .eval-details .answer-preview {
-            background: #0d1117; border: 1px solid #30363d; border-radius: 4px;
+            background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 4px;
             padding: 0.5rem; font-family: 'Cascadia Code', 'Fira Code', monospace;
             font-size: 0.72rem; line-height: 1.4; white-space: pre-wrap;
-            max-height: 200px; overflow-y: auto; color: #8b949e;
+            color: #999;
         }
         .eval-details .check-list { display: flex; gap: 0.5rem; flex-wrap: wrap; }
         .eval-details .check-item {
             font-size: 0.72rem; padding: 0.15rem 0.4rem; border-radius: 3px;
         }
-        .check-item.check-pass { background: #23863633; color: #3fb950; }
-        .check-item.check-fail { background: #f8514933; color: #f85149; }
+        .check-item.check-pass { background: rgba(166,226,46,0.12); color: #a6e22e; }
+        .check-item.check-fail { background: rgba(249,38,114,0.12); color: #f92672; }
 
         /* Architecture */
         .arch-section { margin-bottom: 1.5rem; }
-        .arch-section h3 { color: #58a6ff; font-size: 1rem; margin-bottom: 0.5rem; }
-        .arch-section p { color: #8b949e; font-size: 0.9rem; line-height: 1.5; }
+        .arch-section h3 { color: #f8f8f2; font-size: 0.95rem; margin-bottom: 0.5rem; font-weight: 600; }
+        .arch-section p { color: #8b949e; font-size: 0.88rem; line-height: 1.55; }
         .pipeline {
-            display: flex; align-items: center; gap: 0; flex-wrap: wrap;
-            margin: 1rem 0; padding: 1rem; background: #0d1117;
-            border: 1px solid #30363d; border-radius: 6px;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 0.25rem;
+            margin: 1rem 0; padding: 0.75rem; background: #1e1e1e;
+            border: 1px solid #3e3e3e; border-radius: 6px;
+            position: relative;
         }
         .pipeline-step {
-            padding: 0.5rem 0.8rem; background: #21262d; border: 1px solid #30363d;
-            border-radius: 6px; font-size: 0.82rem; text-align: center;
-            min-width: 90px;
+            padding: 0.6rem 0.4rem; background: #333; border: 1px solid #3e3e3e;
+            border-radius: 6px; font-size: 0.78rem; text-align: center;
+            position: relative;
         }
-        .pipeline-step .step-title { color: #58a6ff; font-weight: 600; }
-        .pipeline-step .step-tech { color: #8b949e; font-size: 0.72rem; margin-top: 0.2rem; }
-        .pipeline-arrow { color: #30363d; font-size: 1.2rem; padding: 0 0.3rem; }
+        .pipeline-step:not(:last-child)::after {
+            content: '\2192'; position: absolute; right: -0.55rem; top: 50%;
+            transform: translateY(-50%); color: #a6e22e; font-size: 0.85rem;
+            z-index: 1; line-height: 1;
+        }
+        .pipeline-step .step-title { color: #66d9ef; font-weight: 600; font-size: 0.78rem; }
+        .pipeline-step .step-tech { color: #8b949e; font-size: 0.68rem; margin-top: 0.25rem; line-height: 1.2; }
+        .pipeline-arrow { display: none; }
         .stats-grid {
             display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
             gap: 0.75rem; margin-top: 0.75rem;
         }
         .stat-card {
-            background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
-            padding: 0.75rem; text-align: center;
+            background: #1e1e1e; border: 1px solid #3e3e3e; border-radius: 8px;
+            padding: 0.85rem; text-align: center;
         }
-        .stat-card .stat-num { color: #58a6ff; font-size: 1.3rem; font-weight: 700; }
-        .stat-card .stat-label { color: #8b949e; font-size: 0.78rem; margin-top: 0.2rem; }
+        .stat-card .stat-num { color: #ae81ff; font-size: 1.4rem; font-weight: 700; }
+        .stat-card .stat-label { color: #8b949e; font-size: 0.78rem; margin-top: 0.25rem; }
         .component-list { list-style: none; }
         .component-list li {
-            padding: 0.5rem 0; border-bottom: 1px solid #21262d;
+            padding: 0.5rem 0; border-bottom: 1px solid #3e3e3e;
             font-size: 0.85rem; line-height: 1.4;
         }
-        .component-list li strong { color: #c9d1d9; }
+        .component-list li strong { color: #f8f8f2; }
         .component-list li span { color: #8b949e; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>LegacyLens</h1>
+        <h1>Legacy<span>Lens</span></h1>
         <p class="subtitle">Ask questions about the LAPACK Fortran codebase</p>
 
         <!-- Query -->
-        <div class="capabilities">
-            <button class="cap-btn active" data-cap="">General Query</button>
-            <button class="cap-btn" data-cap="explain_code">Explain Code</button>
-            <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
-            <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
-            <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
-            <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
-            <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
-        </div>
-
-        <div class="input-group">
-            <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
-            <button id="submit" onclick="submitQuery()">Ask</button>
+        <div class="query-box">
+            <div class="input-group">
+                <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
+            </div>
+            <div class="query-bottom">
+                <div class="capabilities">
+                    <button class="cap-btn active" data-cap="">General</button>
+                    <button class="cap-btn" data-cap="explain_code">Explain Code</button>
+                    <button class="cap-btn" data-cap="generate_docs">Generate Docs</button>
+                    <button class="cap-btn" data-cap="detect_patterns">Detect Patterns</button>
+                    <button class="cap-btn" data-cap="map_dependencies">Map Dependencies</button>
+                    <button class="cap-btn" data-cap="impact_analysis">Impact Analysis</button>
+                    <button class="cap-btn" data-cap="extract_business_rules">Business Rules</button>
+                </div>
+                <button id="submit" onclick="submitQuery()">Ask</button>
+            </div>
         </div>
 
         <div class="spinner" id="spinner">Searching LAPACK codebase...</div>
 
         <div class="result" id="result">
-            <pre id="answer"></pre>
+            <pre id="answer-raw"></pre>
+            <div id="answer-md" class="answer-md" style="display:none"></div>
             <div class="citations" id="citations-box">
                 <h3>Sources</h3>
                 <div id="citations"></div>
@@ -355,11 +435,27 @@
     <script>
         let selectedCapability = "";
 
+        const capPlaceholders = {
+            "": "e.g., What does the DGESV subroutine do?",
+            "explain_code": "e.g., Explain the DGETRF factorization routine",
+            "generate_docs": "e.g., Generate documentation for ZGEMM",
+            "detect_patterns": "e.g., What patterns are used in the BLAS routines?",
+            "map_dependencies": "e.g., What does DGESV call internally?",
+            "impact_analysis": "e.g., What breaks if DTRSM changes its interface?",
+            "extract_business_rules": "e.g., What numerical checks does DGESVD enforce?"
+        };
+
         document.querySelectorAll(".cap-btn").forEach(btn => {
             btn.addEventListener("click", () => {
                 document.querySelectorAll(".cap-btn").forEach(b => b.classList.remove("active"));
                 btn.classList.add("active");
                 selectedCapability = btn.dataset.cap;
+                const q = document.getElementById("query");
+                const example = capPlaceholders[selectedCapability] || capPlaceholders[""];
+                q.placeholder = example;
+                q.value = example.replace(/^e\.g\.,?\s*/i, "");
+                q.focus();
+                q.select();
             });
         });
 
@@ -375,6 +471,93 @@
         function capLabel(cap) { return cap ? cap.replace(/_/g, " ") : "general"; }
 
         function escHtml(s) { return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+        function renderMarkdown(text) {
+            let html = escHtml(text);
+
+            // --- LaTeX cleanup ---
+            // Display math \[ ... \] → styled block
+            html = html.replace(/\\\[([\s\S]*?)\\\]/g, (_, expr) =>
+                `<div class="math-block">${cleanLatex(expr)}</div>`);
+            // Inline math \(...\) → cleaned text
+            html = html.replace(/\\\(([^)]*?)\\\)/g, (_, expr) => `<span class="math-inline">${cleanLatex(expr)}</span>`);
+
+            // Code blocks (``` ... ```)
+            html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+                `<pre><code>${code.replace(/\n$/, '')}</code></pre>`);
+            // Headers
+            html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+            html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+            // Horizontal rules
+            html = html.replace(/^---$/gm, '<hr>');
+            // Bold + italic
+            html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+            // Inline code
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Unordered lists
+            html = html.replace(/^(\s*)[*-] (.+)$/gm, '<li>$2</li>');
+            // Ordered lists
+            html = html.replace(/^(\s*)\d+\. (.+)$/gm, '<li>$2</li>');
+            // Wrap consecutive <li> in <ul>
+            html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+
+            // Parameter-style lines: "NAME: TYPE" → definition term
+            html = html.replace(/^([A-Z][A-Z0-9_]*): (.+)$/gm,
+                '<div class="param-def"><span class="param-name">$1</span><span class="param-type">$2</span></div>');
+
+            // Paragraphs: group remaining text lines
+            const lines = html.split('\n');
+            const out = [];
+            let pBuf = [];
+            const isTag = s => /^<[huplod\/]|^<hr|^<pre|^<div|^<span/.test(s.trim());
+            function flushP() {
+                if (pBuf.length) { out.push('<p>' + pBuf.join(' ') + '</p>'); pBuf = []; }
+            }
+            for (const line of lines) {
+                const t = line.trim();
+                if (!t) { flushP(); continue; }
+                if (isTag(t)) { flushP(); out.push(line); }
+                else { pBuf.push(t); }
+            }
+            flushP();
+            html = out.join('\n');
+            html = html.replace(/<p><\/p>/g, '');
+            return html;
+        }
+
+        function cleanLatex(expr) {
+            return expr
+                .replace(/\\text\{([^}]*)\}/g, '$1')
+                .replace(/\\cdot/g, '\u00b7')
+                .replace(/\\alpha/g, '\u03b1')
+                .replace(/\\beta/g, '\u03b2')
+                .replace(/\\gamma/g, '\u03b3')
+                .replace(/\\delta/g, '\u03b4')
+                .replace(/\\lambda/g, '\u03bb')
+                .replace(/\\sigma/g, '\u03c3')
+                .replace(/\\tau/g, '\u03c4')
+                .replace(/\\pi/g, '\u03c0')
+                .replace(/\\sum/g, '\u2211')
+                .replace(/\\prod/g, '\u220f')
+                .replace(/\\infty/g, '\u221e')
+                .replace(/\\leq/g, '\u2264')
+                .replace(/\\geq/g, '\u2265')
+                .replace(/\\neq/g, '\u2260')
+                .replace(/\\pm/g, '\u00b1')
+                .replace(/\\sqrt\{([^}]*)\}/g, '\u221a($1)')
+                .replace(/\^T/g, '\u1d40')
+                .replace(/\^H/g, '\u1d34')
+                .replace(/\^{([^}]*)}/g, '^($1)')
+                .replace(/_{([^}]*)}/g, '_$1')
+                .replace(/:=/g, ':=')
+                .replace(/\\\\/g, '')
+                .replace(/\\/g, '')
+                .trim();
+        }
 
         function renderObservability(data) {
             const timing = data.timing || {};
@@ -455,7 +638,8 @@
             const extraFiles = retrieved.filter(f => !expected.has(f));
 
             item.innerHTML = `
-                <div class="eval-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                <div class="eval-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <span class="eval-chevron">&#9654;</span>
                     <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
                     <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
@@ -504,7 +688,8 @@
             const preview = escHtml(data.answer_preview || "");
 
             item.innerHTML = `
-                <div class="eval-header" onclick="this.nextElementSibling.classList.toggle('open')">
+                <div class="eval-header" onclick="this.parentElement.classList.toggle('expanded')">
+                    <span class="eval-chevron">&#9654;</span>
                     <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
                     <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
@@ -534,17 +719,23 @@
             const submitBtn = document.getElementById("submit");
             const spinner = document.getElementById("spinner");
             const resultDiv = document.getElementById("result");
-            const answerEl = document.getElementById("answer");
+            const answerRaw = document.getElementById("answer-raw");
+            const answerMd = document.getElementById("answer-md");
             const citationsDiv = document.getElementById("citations");
             const citationsBox = document.getElementById("citations-box");
 
             submitBtn.disabled = true;
             spinner.classList.add("visible");
             resultDiv.classList.remove("visible");
-            answerEl.textContent = "";
+            answerRaw.textContent = "";
+            answerRaw.style.display = "block";
+            answerMd.style.display = "none";
+            answerMd.innerHTML = "";
             citationsDiv.innerHTML = "";
             citationsBox.style.display = "none";
             document.getElementById("meta").textContent = "";
+
+            let fullAnswer = "";
 
             try {
                 const url = selectedCapability ? `/api/capabilities/${selectedCapability}/stream` : "/api/query/stream";
@@ -556,8 +747,14 @@
                         document.getElementById("obs-content").style.display = "block";
                         renderObservability({ retrieval_details: data.retrieval_details, timing: { retrieval_ms: data.timing.retrieval_ms, generation_ms: null, total_ms: null }, token_usage: {} });
                     } else if (event === "token") {
-                        answerEl.textContent += data.token;
+                        fullAnswer += data.token;
+                        answerRaw.textContent = fullAnswer;
                     } else if (event === "done") {
+                        // Swap raw text for rendered markdown
+                        answerRaw.style.display = "none";
+                        answerMd.innerHTML = renderMarkdown(fullAnswer);
+                        answerMd.style.display = "block";
+
                         if (data.citations && data.citations.length > 0) {
                             citationsBox.style.display = "block";
                             data.citations.forEach(c => { const s = document.createElement("span"); s.textContent = c; citationsDiv.appendChild(s); });
@@ -568,7 +765,7 @@
                 });
             } catch (err) {
                 const s = document.createElement("span"); s.className = "error"; s.textContent = `Error: ${err.message}`;
-                answerEl.textContent = ""; answerEl.appendChild(s); resultDiv.classList.add("visible");
+                answerRaw.textContent = ""; answerRaw.appendChild(s); resultDiv.classList.add("visible");
             } finally { submitBtn.disabled = false; spinner.classList.remove("visible"); }
         }
 

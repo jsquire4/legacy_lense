@@ -8,7 +8,7 @@
 
 **OpenAI SDK** — Two models:
 - `text-embedding-3-small` (1536-dim) for embeddings. Cheap ($0.02/1M tokens), good enough for code retrieval where metadata enrichment does the heavy lifting.
-- `gpt-4o` or `gpt-4o-mini` for generation, depending on model streaming speed at time of test. Both have strong instruction following for citation-backed code explanation. The quality ceiling is the retrieved context, not the model.
+- Defaults to `gpt-4.1-nano` for generation, but supports `gpt-3.5-turbo`, `gpt-4o-mini`, `gpt-4o`, `gpt-4.1`, `o4-mini`, and `claude-sonnet-4-5` via a runtime model selector. This lets users compare end-to-end response latency, answer quality, and citation accuracy across model generations, sizes, and reasoning abilities. The quality ceiling is the retrieved context, not the model.
 
 **Qdrant** — Purpose-built vector DB with payload filtering. This was the key enabler for hybrid retrieval — I could do exact name matches via payload filter AND cosine similarity in the same system. Started on Qdrant Cloud free tier, moved to self-hosted on Railway for latency gains (co-located with the app on the same internal network).
 
@@ -88,14 +88,3 @@ Run sequentially, this easily exceeds 3s. With query expansion triggering 5-8 in
 
 **5. Eval pipeline optimization** — The eval harness (37 queries) was taking 10+ minutes. Batching retrieval with `asyncio.gather()` (3 queries at a time to avoid OpenAI throttling) brought it under 3 minutes. Not user-facing latency, but critical for rapid iteration on retrieval quality.
 
-### Current Performance
-
-| Metric | Value |
-|--------|-------|
-| Avg retrieval | <500ms |
-| Avg generation | ~1-2s |
-| Avg end-to-end | <3s |
-| Time to first token | ~300ms |
-| Eval suite (37 queries) | ~3 min |
-
-The remaining latency is dominated by OpenAI API calls (embedding + generation), which are not reducible without switching to local models or a faster provider. The retrieval layer itself is now fast enough that it's no longer the bottleneck.

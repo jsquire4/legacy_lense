@@ -1,6 +1,6 @@
 # LegacyLens
 
-A RAG application for querying the LAPACK Fortran codebase via natural language. Ask questions about routines, algorithms, and dependencies — get citation-backed answers grounded in actual source code.
+A RAG application for querying the LAPACK Fortran codebase via natural language. Ask questions about routines, algorithms, and dependencies — get citation-backed answers grounded in the actual source code.
 
 ## Features
 

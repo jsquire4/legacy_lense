@@ -1,5 +1,9 @@
 """Test fixtures with inline Fortran samples."""
 
+import tempfile
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 
@@ -95,3 +99,108 @@ def sample_f90_code():
 @pytest.fixture
 def sample_large_code():
     return SAMPLE_LARGE_FORTRAN
+
+
+# --- Factory fixture: temporary Fortran files ---
+
+@pytest.fixture
+def tmp_fortran_file():
+    """Factory fixture that creates temp files with given suffix/content and auto-cleans."""
+    created: list[Path] = []
+
+    def _create(content: str | bytes, suffix: str = ".f") -> Path:
+        if isinstance(content, str):
+            content = content.encode()
+        f = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        f.write(content)
+        f.close()
+        p = Path(f.name)
+        created.append(p)
+        return p
+
+    yield _create
+
+    for p in created:
+        p.unlink(missing_ok=True)
+
+
+# --- Embed cache cleanup fixture ---
+
+@pytest.fixture
+def clear_embed_cache():
+    """Clear the embed_query LRU cache before and after test."""
+    import app.services.embeddings as emb_mod
+    emb_mod._embed_cache.clear()
+    yield
+    emb_mod._embed_cache.clear()
+
+
+# --- Generation test helpers ---
+
+@pytest.fixture
+def mock_gen_settings():
+    """Patch get_settings and _get_generation_client for generation tests.
+
+    Yields (settings, mock_client) so tests can configure responses.
+    """
+    with patch("app.services.generation.get_settings") as ms, \
+         patch("app.services.generation._get_generation_client") as mc:
+        settings = MagicMock()
+        settings.CHAT_MODEL = "gpt-4o-mini"
+        ms.return_value = settings
+        mock_client = AsyncMock()
+        mc.return_value = mock_client
+        yield settings, mock_client
+
+
+def make_async_iter(*chunks):
+    """Create an async iterator from mock stream chunks."""
+    async def _iter():
+        for c in chunks:
+            yield c
+    return _iter()
+
+
+# --- Retrieval test fixtures ---
+
+@pytest.fixture
+def retrieval_mocks():
+    """Patch embed_query, async_search_by_name, async_search for retrieval tests.
+
+    Yields (mock_embed, mock_search_by_name, mock_search).
+    """
+    with patch("app.services.retrieval.embed_query", new_callable=AsyncMock) as me, \
+         patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock) as msn, \
+         patch("app.services.retrieval.async_search", new_callable=AsyncMock) as ms:
+        me.return_value = [0.1] * 1536
+        yield me, msn, ms
+
+
+# --- API test helpers ---
+
+def make_retrieve_result(
+    chunks=None, strategy="vector", expanded_names=None,
+):
+    """Build a standard retrieve() return value for API tests."""
+    if chunks is None:
+        chunks = [
+            {"id": "abc123", "text": "test", "score": 0.9,
+             "metadata": {"file_path": "test.f"}, "_match_type": "vector"}
+        ]
+    return {
+        "chunks": chunks,
+        "expanded_names": expanded_names or [],
+        "retrieval_strategy": strategy,
+    }
+
+
+def make_generate_result(
+    answer="Test answer", citations=None, model="gpt-4o-mini", token_usage=None,
+):
+    """Build a standard generate_answer() return value for API tests."""
+    return {
+        "answer": answer,
+        "citations": citations or [],
+        "model": model,
+        "token_usage": token_usage or {},
+    }

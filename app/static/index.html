@@ -509,11 +509,13 @@
         <div class="panel">
             <h2 class="panel-title">Retrieval Evals <span id="ret-summary" style="font-size:0.85rem;font-weight:normal;color:#aaa"></span></h2>
             <div class="eval-controls">
+                <select id="ret-model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
                 <span class="eval-status" id="eval-status"></span>
             </div>
             <div class="eval-metrics" id="eval-metrics" style="display:none">
                 <div class="obs-stats">
+                    <div class="stat"><span class="stat-value" id="eval-precision">—</span><span>Precision@5</span></div>
                     <div class="stat"><span class="stat-value" id="eval-recall">—</span><span>Recall@5</span></div>
                     <div class="stat"><span class="stat-value" id="eval-latency">—</span><span>Avg Latency</span></div>
                     <div class="stat"><span class="stat-value" id="eval-progress">—</span><span>Queries</span></div>
@@ -540,13 +542,24 @@
             <div class="eval-rows" id="e2e-rows"></div>
         </div>
 
-        <!-- Trial History -->
+        <!-- E2E Trial History -->
         <div class="panel">
-            <h2 class="panel-title">Trial History <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
+            <h2 class="panel-title">E2E Trial History <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
             <div class="trial-scroll">
                 <table class="trial-table" id="trials-table">
                     <thead><tr><th>Model</th><th>Input $/1M</th><th>Output $/1M</th><th>Pass Rate</th><th>E2E Latency</th><th>E2E Runs</th><th></th></tr></thead>
                     <tbody id="trials-body"><tr><td colspan="7" style="color:#555">Loading models...</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Retrieval Trial History -->
+        <div class="panel">
+            <h2 class="panel-title">Retrieval Trial History</h2>
+            <div class="trial-scroll">
+                <table class="trial-table" id="ret-trials-table">
+                    <thead><tr><th>Embedding Model</th><th>Dimensions</th><th>P@5</th><th>R@5</th><th>Avg Latency</th><th>Queries</th><th></th></tr></thead>
+                    <tbody id="ret-trials-body"><tr><td colspan="7" style="color:#555">No retrieval trials yet</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -619,6 +632,12 @@
         let retRunCount = JSON.parse(localStorage.getItem("retRunCount")) || 0;
         let lastRetrievalSummary = null;
         let lastE2ESummary = null;
+
+        // --- Prefetch query expansion ---
+        let prefetchedExpansion = null;   // { names: [...], queryText: "..." }
+        let expansionAbortController = null;
+        let expansionDebounceTimer = null;
+        const ROUTINE_RE = /\b[SDCZIsdczi][A-Za-z][A-Za-z0-9]{2,7}\b/;
 
         function fmtSec(ms) {
             if (ms == null) return "—";
@@ -861,6 +880,7 @@
             item.className = "eval-item";
             const capClass = data.capability ? "" : " cap-null";
             const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
+            const p5 = data.precision_at_5 != null ? data.precision_at_5.toFixed(2) : "--";
 
             // Build file comparison
             const expected = new Set(data.expected_files || []);
@@ -874,7 +894,8 @@
                     <span class="eval-chevron">&#9654;</span>
                     <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
-                    <span class="eval-score ${passClass}">${data.recall_at_5.toFixed(2)}</span>
+                    <span class="eval-score" style="color:#66d9ef" title="P@5">${p5}</span>
+                    <span class="eval-score ${passClass}" title="R@5">${data.recall_at_5.toFixed(2)}</span>
                     <span class="eval-ms">${fmtSec(data.latency_ms)}</span>
                 </div>
                 <div class="eval-details">
@@ -945,6 +966,42 @@
             return item;
         }
 
+        function schedulePrefetch() {
+            const query = document.getElementById("query").value.trim();
+            clearTimeout(expansionDebounceTimer);
+            // Skip: empty, too short, or contains a routine name
+            if (!query || query.length < 10 || ROUTINE_RE.test(query)) {
+                prefetchedExpansion = null;
+                return;
+            }
+            // Already have a valid prefetch for this exact query
+            if (prefetchedExpansion && prefetchedExpansion.queryText === query) return;
+            expansionDebounceTimer = setTimeout(async () => {
+                // Abort any in-flight request
+                if (expansionAbortController) expansionAbortController.abort();
+                expansionAbortController = new AbortController();
+                try {
+                    const body = { query };
+                    if (queryModel) body.model = queryModel;
+                    const resp = await fetch("/api/expand", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(body),
+                        signal: expansionAbortController.signal,
+                    });
+                    if (!resp.ok) return;
+                    const data = await resp.json();
+                    if (data.expanded_names && data.expanded_names.length > 0) {
+                        prefetchedExpansion = { names: data.expanded_names, queryText: query };
+                    }
+                } catch (e) {
+                    // Abort or network error — silently ignore
+                }
+            }, 500);
+        }
+
+        document.getElementById("query").addEventListener("input", schedulePrefetch);
+
         async function submitQuery() {
             const query = document.getElementById("query").value.trim();
             if (!query) return;
@@ -972,6 +1029,13 @@
                 const url = selectedCapability ? `/api/capabilities/${selectedCapability}/stream` : "/api/query/stream";
                 const body = { query };
                 if (queryModel) body.model = queryModel;
+                // Attach prefetched expansion if available and matches current query
+                if (prefetchedExpansion && prefetchedExpansion.queryText === query) {
+                    body.expanded_names = prefetchedExpansion.names;
+                }
+                prefetchedExpansion = null;
+                if (expansionAbortController) { expansionAbortController.abort(); expansionAbortController = null; }
+                clearTimeout(expansionDebounceTimer);
                 await readSSE(url, "POST", body, ({ event, data }) => {
                     if (event === "retrieval") {
                         spinner.classList.remove("visible");
@@ -984,6 +1048,11 @@
                     } else if (event === "token") {
                         fullAnswer += data.token;
                         answerMd.innerHTML = renderMarkdown(fullAnswer);
+                    } else if (event === "error") {
+                        spinner.classList.remove("visible");
+                        resultDiv.classList.add("visible");
+                        const s = document.createElement("span"); s.className = "error"; s.textContent = `Error: ${data.message || "Unknown error"}`;
+                        answerMd.innerHTML = ""; answerRaw.textContent = ""; answerRaw.appendChild(s);
                     } else if (event === "done") {
                         answerMd.innerHTML = renderMarkdown(fullAnswer);
                         answerMd.querySelectorAll("pre code").forEach(el => { hljs.highlightElement(el); });
@@ -1002,93 +1071,112 @@
             } finally { submitBtn.disabled = false; spinner.classList.remove("visible"); }
         }
 
-        async function runEvals() {
-            const btn = document.getElementById("eval-btn");
-            const statusEl = document.getElementById("eval-status");
-            const metricsDiv = document.getElementById("eval-metrics");
-            const rowsDiv = document.getElementById("eval-rows");
-            const recallEl = document.getElementById("eval-recall");
-            const latencyEl = document.getElementById("eval-latency");
-            const progressEl = document.getElementById("eval-progress");
+        async function runEvalStream({ btnId, statusId, metricsId, rowsId, url, onProgress, onSummary, onFinish }) {
+            const btn = document.getElementById(btnId);
+            const statusEl = document.getElementById(statusId);
+            const metricsDiv = document.getElementById(metricsId);
+            const rowsDiv = document.getElementById(rowsId);
 
             btn.disabled = true; statusEl.textContent = "Running...";
             metricsDiv.style.display = "block"; rowsDiv.innerHTML = "";
-            recallEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
 
-            let runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
-            let hadError = false;
+            let summaryData = null, hadError = false;
             try {
-                await readSSE("/api/eval/stream", "GET", null, ({ event, data }) => {
-                    if (event === "progress") {
-                        completed++;
-                        runningRecall += data.recall_at_5;
-                        runningLatency += data.latency_ms;
-                        recallEl.textContent = (runningRecall / completed).toFixed(3);
-                        latencyEl.textContent = fmtSec(runningLatency / completed);
-                        progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
-                        rowsDiv.appendChild(buildRetrievalRow(data));
-                    } else if (event === "summary") {
-                        total = data.total_queries;
-                        recallEl.textContent = data.avg_recall_at_5.toFixed(3);
-                        latencyEl.textContent = fmtSec(data.avg_latency_ms);
-                        progressEl.textContent = `${total} / ${total}`;
-                        statusEl.textContent = "Done";
-                        lastRetrievalSummary = data;
-                    }
+                await readSSE(url, "GET", null, ({ event, data }) => {
+                    if (event === "progress") onProgress(data, rowsDiv);
+                    else if (event === "summary") { summaryData = data; onSummary(data, statusEl); }
                 });
             } catch (err) { hadError = true; statusEl.textContent = `Error: ${err.message}`; }
             finally {
                 btn.disabled = false;
-                if (!hadError && lastRetrievalSummary) {
-                    const s = lastRetrievalSummary;
+                if (!hadError && summaryData && onFinish) onFinish(summaryData);
+            }
+        }
+
+        async function runEvals() {
+            const precisionEl = document.getElementById("eval-precision");
+            const recallEl = document.getElementById("eval-recall");
+            const latencyEl = document.getElementById("eval-latency");
+            const progressEl = document.getElementById("eval-progress");
+            precisionEl.textContent = "—"; recallEl.textContent = "—";
+            latencyEl.textContent = "—"; progressEl.textContent = "—";
+
+            let runningPrecision = 0, runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
+            const retEmbModel = document.getElementById("ret-model-select").value || "";
+            let url = "/api/eval/stream";
+            if (retEmbModel) url += `?embedding_model=${encodeURIComponent(retEmbModel)}`;
+
+            await runEvalStream({
+                btnId: "eval-btn", statusId: "eval-status", metricsId: "eval-metrics", rowsId: "eval-rows", url,
+                onProgress(data, rowsDiv) {
+                    completed++;
+                    runningPrecision += (data.precision_at_5 || 0);
+                    runningRecall += data.recall_at_5;
+                    runningLatency += data.latency_ms;
+                    precisionEl.textContent = (runningPrecision / completed).toFixed(3);
+                    recallEl.textContent = (runningRecall / completed).toFixed(3);
+                    latencyEl.textContent = fmtSec(runningLatency / completed);
+                    progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
+                    rowsDiv.appendChild(buildRetrievalRow(data));
+                },
+                onSummary(data, statusEl) {
+                    total = data.total_queries;
+                    precisionEl.textContent = (data.avg_precision_at_5 || 0).toFixed(3);
+                    recallEl.textContent = data.avg_recall_at_5.toFixed(3);
+                    latencyEl.textContent = fmtSec(data.avg_latency_ms);
+                    progressEl.textContent = `${total} / ${total}`;
+                    statusEl.textContent = "Done";
+                    lastRetrievalSummary = data;
+                },
+                onFinish(s) {
                     retAvgLatency = s.avg_latency_ms;
                     retAvgRecall = s.avg_recall_at_5;
                     retRunCount++;
                     updateRetSummary();
-                }
-            }
+                    const embInfo = embeddingModelsData.find(m => m.name === retEmbModel) || {};
+                    autoSaveTrial({
+                        model: retEmbModel || "text-embedding-3-small",
+                        eval_type: "retrieval",
+                        avg_precision_at_5: s.avg_precision_at_5,
+                        avg_recall_at_5: s.avg_recall_at_5,
+                        avg_retrieval_latency_ms: s.avg_latency_ms,
+                        total_queries: s.total_queries,
+                        embedding_model: retEmbModel || "text-embedding-3-small",
+                        embedding_dimensions: embInfo.dimensions || null,
+                    });
+                },
+            });
         }
 
         async function runE2EEvals() {
-            const btn = document.getElementById("e2e-btn");
-            const statusEl = document.getElementById("e2e-status");
-            const metricsDiv = document.getElementById("e2e-metrics");
-            const rowsDiv = document.getElementById("e2e-rows");
             const passRateEl = document.getElementById("e2e-pass-rate");
             const latencyEl = document.getElementById("e2e-latency");
             const progressEl = document.getElementById("e2e-progress");
-
-            btn.disabled = true; statusEl.textContent = "Running...";
-            metricsDiv.style.display = "block"; rowsDiv.innerHTML = "";
             passRateEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
 
             let totalPassed = 0, runningLatency = 0, completed = 0, total = 0;
-            let hadError = false;
-            try {
-                const e2eUrl = e2eModel ? `/api/eval/e2e/stream?model=${encodeURIComponent(e2eModel)}` : "/api/eval/e2e/stream";
-                await readSSE(e2eUrl, "GET", null, ({ event, data }) => {
-                    if (event === "progress") {
-                        completed++;
-                        if (data.passed) totalPassed++;
-                        runningLatency += data.latency_ms;
-                        passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
-                        latencyEl.textContent = fmtSec(runningLatency / completed);
-                        progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
-                        rowsDiv.appendChild(buildE2ERow(data));
-                    } else if (event === "summary") {
-                        total = data.total_queries;
-                        passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
-                        latencyEl.textContent = fmtSec(data.avg_latency_ms);
-                        progressEl.textContent = `${total} / ${total}`;
-                        statusEl.textContent = `Done — ${data.passed}/${total} passed`;
-                        lastE2ESummary = data;
-                    }
-                });
-            } catch (err) { hadError = true; statusEl.textContent = `Error: ${err.message}`; }
-            finally {
-                btn.disabled = false;
-                if (!hadError && lastE2ESummary) {
-                    const s = lastE2ESummary;
+            const url = e2eModel ? `/api/eval/e2e/stream?model=${encodeURIComponent(e2eModel)}` : "/api/eval/e2e/stream";
+
+            await runEvalStream({
+                btnId: "e2e-btn", statusId: "e2e-status", metricsId: "e2e-metrics", rowsId: "e2e-rows", url,
+                onProgress(data, rowsDiv) {
+                    completed++;
+                    if (data.passed) totalPassed++;
+                    runningLatency += data.latency_ms;
+                    passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
+                    latencyEl.textContent = fmtSec(runningLatency / completed);
+                    progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
+                    rowsDiv.appendChild(buildE2ERow(data));
+                },
+                onSummary(data, statusEl) {
+                    total = data.total_queries;
+                    passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
+                    latencyEl.textContent = fmtSec(data.avg_latency_ms);
+                    progressEl.textContent = `${total} / ${total}`;
+                    statusEl.textContent = `Done — ${data.passed}/${total} passed`;
+                    lastE2ESummary = data;
+                },
+                onFinish(s) {
                     autoSaveTrial({
                         model: e2eModel || defaultModelName(),
                         eval_type: "e2e",
@@ -1096,9 +1184,28 @@
                         avg_e2e_latency_ms: s.avg_latency_ms,
                         total_queries: s.total_queries,
                     });
-                }
-            }
+                },
+            });
         }
+        // --- Embedding model selector ---
+        let embeddingModelsData = [];
+        async function loadEmbeddingModels() {
+            try {
+                const res = await fetch("/api/embedding-models");
+                const data = await res.json();
+                embeddingModelsData = data.models || [];
+                const select = document.getElementById("ret-model-select");
+                select.innerHTML = "";
+                embeddingModelsData.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.name;
+                    opt.textContent = `${m.name} (${m.dimensions}d)`;
+                    if (m.name === "text-embedding-3-small") opt.selected = true;
+                    select.appendChild(opt);
+                });
+            } catch (e) { console.error("Failed to load embedding models", e); }
+        }
+
         // --- Model selector & pricing ---
         let modelsData = [];
         function populateModelSelect(selectId, onChange) {
@@ -1147,7 +1254,46 @@
             const el = document.getElementById("ret-summary");
             const recall = retAvgRecall != null ? retAvgRecall.toFixed(3) : "--";
             const lat = retAvgLatency != null ? fmtSec(retAvgLatency) : "--";
-            el.innerHTML = `— Recall@5 <strong style="color:#e0e0e0">${recall}</strong>, Avg Latency <strong style="color:#e0e0e0">${lat}</strong>, ${retRunCount} run${retRunCount !== 1 ? "s" : ""}`;
+            el.innerHTML = `— R@5 <strong style="color:#e0e0e0">${recall}</strong>, Latency <strong style="color:#e0e0e0">${lat}</strong>, ${retRunCount} run${retRunCount !== 1 ? "s" : ""}`;
+        }
+
+        async function loadRetrievalTrials() {
+            const tbody = document.getElementById("ret-trials-body");
+            let trials = [];
+            try {
+                const res = await fetch("/api/trials?eval_type=retrieval");
+                const data = await res.json();
+                trials = data.trials || [];
+            } catch (e) {
+                console.error("Failed to fetch retrieval trials", e);
+            }
+            if (!trials.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">No retrieval trials yet</td></tr>';
+                return;
+            }
+            // Find best values
+            const p5vals = trials.map(t => t.avg_precision_at_5).filter(v => v != null);
+            const r5vals = trials.map(t => t.avg_recall_at_5).filter(v => v != null);
+            const bestP5 = Math.max(...p5vals, -Infinity);
+            const bestR5 = Math.max(...r5vals, -Infinity);
+            const dash = '<span class="trial-no-data">--</span>';
+            const best = (val, target) => val != null && val === target ? ' class="trial-best"' : '';
+
+            tbody.innerHTML = "";
+            for (const t of trials) {
+                const tr = document.createElement("tr");
+                const embName = t.embedding_model || t.model || "--";
+                const dims = t.embedding_dimensions || "--";
+                tr.innerHTML =
+                    `<td class="trial-model">${embName}</td>` +
+                    `<td>${dims}</td>` +
+                    `<td${best(t.avg_precision_at_5, bestP5)}>${t.avg_precision_at_5 != null ? t.avg_precision_at_5.toFixed(3) : dash}</td>` +
+                    `<td${best(t.avg_recall_at_5, bestR5)}>${t.avg_recall_at_5 != null ? t.avg_recall_at_5.toFixed(3) : dash}</td>` +
+                    `<td>${t.avg_retrieval_latency_ms != null ? fmtSec(t.avg_retrieval_latency_ms) : dash}</td>` +
+                    `<td>${t.total_queries || dash}</td>` +
+                    `<td><button class="trial-delete" onclick="deleteTrial(${t.id})">&#10005;</button></td>`;
+                tbody.appendChild(tr);
+            }
         }
 
         async function autoSaveTrial(trialData) {
@@ -1159,6 +1305,7 @@
                 });
                 if (!res.ok) throw new Error(`Save failed: ${res.status}`);
                 await loadTrials();
+                await loadRetrievalTrials();
             } catch (e) {
                 console.error("Failed to autosave trial", e);
             }
@@ -1172,7 +1319,7 @@
             }
             let trials = [];
             try {
-                const res = await fetch("/api/trials");
+                const res = await fetch("/api/trials?eval_type=e2e");
                 const data = await res.json();
                 trials = data.trials || [];
             } catch (e) {
@@ -1184,7 +1331,7 @@
             // trials are already newest-first from the API
             for (const t of trials) {
                 if (!byModel[t.model]) byModel[t.model] = { e2e: [] };
-                if (t.eval_type === "e2e") byModel[t.model].e2e.push(t);
+                byModel[t.model].e2e.push(t);
             }
 
             // Build per-model aggregates
@@ -1238,13 +1385,14 @@
         async function deleteTrial(id) {
             await fetch(`/api/trials/${id}`, { method: "DELETE" });
             await loadTrials();
+            await loadRetrievalTrials();
         }
 
         // Init — models must load before trials so the table can render all models
         async function init() {
             if (retRunCount > 0) updateRetSummary();
-            await loadModels();
-            await loadTrials();
+            await Promise.all([loadModels(), loadEmbeddingModels()]);
+            await Promise.all([loadTrials(), loadRetrievalTrials()]);
         }
         init();
     </script>

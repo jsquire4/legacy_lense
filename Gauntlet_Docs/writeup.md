@@ -8,7 +8,7 @@
 
 **OpenAI SDK** — Two models:
 - `text-embedding-3-small` (1536-dim) for embeddings. Cheap ($0.02/1M tokens), good enough for code retrieval where metadata enrichment does the heavy lifting.
-- Defaults to `gpt-4.1-nano` for generation, but supports `gpt-3.5-turbo`, `gpt-4o-mini`, `gpt-4o`, `gpt-4.1`, `o4-mini`, and `claude-sonnet-4-5` via a runtime model selector. This lets users compare end-to-end response latency, answer quality, and citation accuracy across model generations, sizes, and reasoning abilities. The quality ceiling is the retrieved context, not the model.
+- Defaults to `gpt-4.1-nano` for generation, but supports 9 models total — `gpt-3.5-turbo`, `gpt-4o-mini`, `gpt-4o`, `gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-4.1`, `gpt-5-nano`, `gpt-5-mini`, and `gpt-5.2` — via a runtime model selector. This lets users compare end-to-end response latency, answer quality, and citation accuracy across model generations, sizes, and reasoning abilities. The quality ceiling is the retrieved context, not the model.
 
 **Qdrant** — Purpose-built vector DB with payload filtering. This was the key enabler for hybrid retrieval — I could do exact name matches via payload filter AND cosine similarity in the same system. Started on Qdrant Cloud free tier, moved to self-hosted on Railway for latency gains (co-located with the app on the same internal network).
 
@@ -57,7 +57,7 @@ The system prompt demands file:line citations for every claim. If the LLM skips 
 
 ### What if too much context is stuffed into the prompt?
 
-There's a hard budget of ~6,000 tokens for retrieved context. Chunks are added in order of relevance until the budget runs out. If a chunk would push past the limit, it's excluded entirely — no partial routines, since a half-complete function confuses the LLM more than it helps.
+There's a hard budget of 3,000 tokens for retrieved context. Chunks are added in order of relevance until the budget runs out. If a chunk would push past the limit, it's excluded entirely — no partial routines, since a half-complete function confuses the LLM more than it helps.
 
 ## Most Difficult Problem: Latency
 
@@ -84,7 +84,7 @@ Run sequentially, this easily exceeds 3s. With query expansion triggering 5-8 in
 
 **3. Streaming generation** — Didn't reduce actual latency, but eliminated perceived latency. The first token appears in ~300ms, so the user sees the answer building in real-time while the full generation takes 1-2s. Retrieval details are sent as the first SSE event, so the chunk sidebar populates instantly.
 
-**4. Context budget enforcement** — Early versions stuffed too many tokens into the generation prompt, causing gpt-4o to take longer. Capping context at ~6,000 tokens kept generation time predictable at 1-2s.
+**4. Context budget enforcement** — Early versions stuffed too many tokens into the generation prompt, causing gpt-4o to take longer. Capping context at 3,000 tokens kept generation time predictable at 1-2s.
 
-**5. Eval pipeline optimization** — The eval harness (37 queries) was taking 10+ minutes. Batching retrieval with `asyncio.gather()` (3 queries at a time to avoid OpenAI throttling) brought it under 3 minutes. Not user-facing latency, but critical for rapid iteration on retrieval quality.
+**5. Eval pipeline optimization** — The eval harness (37 queries) was taking 10+ minutes. Batching retrieval with `asyncio.gather()` (5 queries at a time to balance throughput and API limits) brought it under 3 minutes. Not user-facing latency, but critical for rapid iteration on retrieval quality.
 

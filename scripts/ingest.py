@@ -9,10 +9,12 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.config import get_settings
 from app.services.parser import parse_file
 from app.services.chunker import chunk_units
 from app.services.embeddings import embed_texts
-from app.services.vector_store import ensure_collection, upsert_chunks
+from app.services.vector_store import ensure_collection, upsert_chunks, delete_collection
+from app.embedding_registry import EMBEDDING_MODELS, collection_name_for_model, get_model_info
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,7 +51,27 @@ def main():
     parser.add_argument("--subdirs", type=str, nargs="+",
                         default=["SRC", "BLAS/SRC"],
                         help="Subdirectories to ingest")
+    parser.add_argument("--embedding-model", type=str, default=None,
+                        help="Embedding model to use (default: from settings)")
+    parser.add_argument("--collection-name", type=str, default=None,
+                        help="Qdrant collection name override")
+    parser.add_argument("--recreate", action="store_true",
+                        help="Delete target collection before ingesting")
     args = parser.parse_args()
+
+    # Resolve embedding model and collection name
+    embedding_model = args.embedding_model
+    if embedding_model and embedding_model in EMBEDDING_MODELS:
+        model_info = get_model_info(embedding_model)
+        embedding_dim = model_info.dimensions
+        target_collection = args.collection_name or collection_name_for_model("lapack", embedding_model)
+        logger.info("Using embedding model: %s (dim=%d, collection=%s)",
+                    embedding_model, embedding_dim, target_collection)
+    else:
+        embedding_dim = None  # use settings default
+        target_collection = args.collection_name  # None = use settings default
+        if embedding_model:
+            logger.warning("Unknown embedding model '%s', using settings default", embedding_model)
 
     data_dir = Path(args.data_dir)
     if not data_dir.exists():
@@ -88,8 +110,15 @@ def main():
     logger.info("Parsing complete: %d units from %d files (%d errors)",
                 len(all_units), len(all_files), parse_errors)
 
+    # Build reverse call-graph (called_by_map)
+    called_by_map: dict[str, list[str]] = {}
+    for unit in all_units:
+        for called in unit.called_routines:
+            called_by_map.setdefault(called, []).append(unit.name)
+    logger.info("Built reverse call-graph: %d routines have callers", len(called_by_map))
+
     # Chunk all units
-    all_chunks = chunk_units(all_units)
+    all_chunks = chunk_units(all_units, called_by_map=called_by_map)
     logger.info("Chunking complete: %d chunks", len(all_chunks))
 
     if args.dry_run:
@@ -105,8 +134,18 @@ def main():
         logger.info("Dry run completed in %.1fs", elapsed)
         return
 
+    # Handle --recreate
+    if args.recreate:
+        coll_to_delete = target_collection or get_settings().QDRANT_COLLECTION_NAME
+        if delete_collection(coll_to_delete):
+            logger.info("Deleted collection '%s' for recreate", coll_to_delete)
+        # Also delete legacy "lapack" collection if it exists and is different
+        if coll_to_delete != "lapack":
+            if delete_collection("lapack"):
+                logger.info("Deleted legacy 'lapack' collection")
+
     # Ensure collection exists
-    ensure_collection()
+    ensure_collection(collection_name=target_collection, embedding_dim=embedding_dim)
 
     # Embed and upsert in batches
     batch_size = args.batch_size
@@ -118,7 +157,7 @@ def main():
 
         logger.info("Embedding batch %d-%d of %d...",
                     i, i + len(batch), len(all_chunks))
-        embeddings = embed_texts(texts)
+        embeddings = embed_texts(texts, model=embedding_model)
 
         if len(embeddings) != len(batch):
             logger.error("Embedding count mismatch: %d embeddings for %d chunks — skipping batch",
@@ -126,13 +165,14 @@ def main():
             continue
 
         logger.info("Upserting batch...")
-        upsert_chunks(batch, embeddings)
+        upsert_chunks(batch, embeddings, collection_name=target_collection)
         total_upserted += len(batch)
 
         logger.info("Progress: %d/%d chunks upserted", total_upserted, len(all_chunks))
 
     elapsed = time.time() - start_time
-    logger.info("Ingestion complete: %d chunks upserted in %.1fs", total_upserted, elapsed)
+    chunks_per_sec = total_upserted / elapsed if elapsed > 0 else 0
+    logger.info("Ingestion complete: %d chunks upserted in %.1fs (%.1f chunks/sec)", total_upserted, elapsed, chunks_per_sec)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 import asyncio
 import hashlib
-import json
 import logging
 import time
 from collections import OrderedDict
@@ -11,16 +10,21 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.services.retrieval import retrieve
+from app.schemas import (
+    QueryRequest, ChunkDetail, TimingDetail, TokenUsage,
+    RetrievalDetails, QueryResponse, CapabilityRequest, TrialRequest,
+    ExpandRequest, ExpandResponse,
+)
+from app.services.retrieval import retrieve, _expand_query, _extract_routine_name
 from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.services.trial_store import save_trial, list_trials, delete_trial
-from app.models_data import MODELS, MODEL_NAMES
+from app.services.eval_runner import eval_stream_generator, e2e_eval_stream_generator
+from app.models_data import MODELS
 from app.logging_config import setup_logging
-from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
+from app.sse import sse_event as _sse_event
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +36,10 @@ _CACHE_MAX = 64
 _CACHE_TTL = 300  # 5 minutes
 
 
-def _cache_key(query: str, top_k: int, capability: str | None, model: str | None = None) -> str:
-    raw = f"{query}|{top_k}|{capability}|{model}"
+def _cache_key(query: str, top_k: int, capability: str | None, model: str | None = None,
+               expanded_names: list[str] | None = None) -> str:
+    names_part = ",".join(sorted(expanded_names)) if expanded_names else ""
+    raw = f"{query}|{top_k}|{capability}|{model}|{names_part}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -96,56 +102,6 @@ app.add_middleware(
 )
 
 
-# --- Request / Response models ---
-
-class QueryRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=2000)
-    top_k: int = Field(default=8, ge=1, le=20)
-    model: str | None = None
-
-
-class ChunkDetail(BaseModel):
-    rank: int
-    chunk_id: str
-    file_name: str
-    routine_name: str
-    score: float
-    match_type: str
-
-
-class TimingDetail(BaseModel):
-    retrieval_ms: float
-    generation_ms: float
-    total_ms: float
-
-
-class TokenUsage(BaseModel):
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-class RetrievalDetails(BaseModel):
-    strategy: str
-    expanded_names: list[str] = []
-    chunks: list[ChunkDetail] = []
-
-
-class QueryResponse(BaseModel):
-    answer: str
-    citations: list[str]
-    latency_ms: float
-    retrieval_details: RetrievalDetails | None = None
-    token_usage: TokenUsage | None = None
-    timing: TimingDetail | None = None
-
-
-class CapabilityRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=2000)
-    top_k: int = Field(default=8, ge=1, le=20)
-    model: str | None = None
-
-
 # --- Endpoints ---
 
 @app.get("/health")
@@ -170,9 +126,9 @@ def _build_chunk_details(chunks: list[dict]) -> list[ChunkDetail]:
     return details
 
 
-async def _build_response(query: str, top_k: int, capability: str | None = None, model: str | None = None) -> QueryResponse:
+async def _build_response(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None) -> QueryResponse:
     """Shared logic for query and capability endpoints."""
-    key = _cache_key(query, top_k, capability, model)
+    key = _cache_key(query, top_k, capability, model, expanded_names)
     cached = _cache_get(key)
     if cached is not None:
         logger.info("Cache hit for query: %.80s", query)
@@ -180,7 +136,11 @@ async def _build_response(query: str, top_k: int, capability: str | None = None,
 
     t0 = time.time()
 
-    retrieval_result = await retrieve(query, top_k, model=model)
+    try:
+        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names)
+    except Exception as e:
+        logger.error("Retrieval failed for query '%.80s': %s", query, e)
+        raise
     chunks = retrieval_result["chunks"]
     t_retrieval = time.time()
 
@@ -234,77 +194,94 @@ async def _build_response(query: str, top_k: int, capability: str | None = None,
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
-    return await _build_response(req.query, req.top_k, None, model=req.model)
+    return await _build_response(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names)
 
 
 @app.post("/api/capabilities/{capability}", response_model=QueryResponse)
 async def capability_endpoint(capability: str, req: CapabilityRequest):
     if capability not in CAPABILITIES:
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
-    return await _build_response(req.query, req.top_k, capability, model=req.model)
+    return await _build_response(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names)
 
 
-def _sse_event(event: str, data: dict) -> str:
-    """Format a single SSE event."""
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+@app.post("/api/expand", response_model=ExpandResponse)
+async def expand_endpoint(req: ExpandRequest):
+    """Pre-expand a conceptual query into LAPACK routine names (for prefetch)."""
+    query_hash = hashlib.md5(req.query.encode()).hexdigest()
+    if _extract_routine_name(req.query):
+        return ExpandResponse(expanded_names=[], query_hash=query_hash)
+    names = await _expand_query(req.query, model=req.model)
+    return ExpandResponse(expanded_names=names, query_hash=query_hash)
 
 
-async def _stream_generator(query: str, top_k: int, capability: str | None = None, model: str | None = None):
+def _chunk_detail_to_dict(detail: ChunkDetail, text: str = "") -> dict:
+    """Convert a ChunkDetail to dict, optionally including text for streaming."""
+    d = detail.model_dump()
+    if text:
+        d["text"] = text
+    return d
+
+
+async def _stream_generator(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None):
     """Async generator that yields SSE events: retrieval, token*, done."""
     t0 = time.time()
 
-    retrieval_result = await retrieve(query, top_k, model=model)
+    try:
+        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names)
+    except Exception as e:
+        logger.error("Stream retrieval failed: %s", e)
+        yield _sse_event("error", {"message": f"Retrieval failed: {e}"})
+        return
     chunks = retrieval_result["chunks"]
     t_retrieval = time.time()
     retrieval_ms = round((t_retrieval - t0) * 1000, 1)
 
-    # Build chunk details
-    chunk_details = []
-    for i, chunk in enumerate(chunks):
-        meta = chunk.get("metadata", {})
-        file_path = meta.get("file_path", "")
-        chunk_details.append({
-            "rank": i + 1,
-            "chunk_id": str(chunk.get("id", "")),
-            "file_name": Path(file_path).name if file_path else "",
-            "routine_name": meta.get("unit_name", ""),
-            "score": round(chunk.get("score", 0.0), 4),
-            "match_type": chunk.get("_match_type", "vector"),
-            "text": chunk.get("text", ""),
-        })
+    # Reuse _build_chunk_details, then add text for streaming
+    chunk_details = _build_chunk_details(chunks)
+    chunk_dicts = [
+        _chunk_detail_to_dict(detail, text=chunk.get("text", ""))
+        for detail, chunk in zip(chunk_details, chunks)
+    ]
 
     yield _sse_event("retrieval", {
         "retrieval_details": {
             "strategy": retrieval_result["retrieval_strategy"],
             "expanded_names": retrieval_result["expanded_names"],
-            "chunks": chunk_details,
+            "chunks": chunk_dicts,
         },
         "timing": {"retrieval_ms": retrieval_ms},
     })
 
     # Stream generation tokens
-    async for event in generate_answer_stream(query, chunks, capability, model=model):
-        if event["type"] == "token":
-            yield _sse_event("token", {"token": event["token"]})
-        elif event["type"] == "done":
-            t_done = time.time()
-            generation_ms = round((t_done - t_retrieval) * 1000, 1)
-            total_ms = round((t_done - t0) * 1000, 1)
-            yield _sse_event("done", {
-                "citations": event["citations"],
-                "token_usage": event["token_usage"],
-                "timing": {
-                    "retrieval_ms": retrieval_ms,
-                    "generation_ms": generation_ms,
-                    "total_ms": total_ms,
-                },
-            })
+    try:
+        async for event in generate_answer_stream(query, chunks, capability, model=model):
+            if event["type"] == "token":
+                yield _sse_event("token", {"token": event["token"]})
+            elif event["type"] == "error":
+                logger.error("Stream generation error: %s", event.get("message", "unknown"))
+                yield _sse_event("error", {"message": event.get("message", "Generation failed")})
+            elif event["type"] == "done":
+                t_done = time.time()
+                generation_ms = round((t_done - t_retrieval) * 1000, 1)
+                total_ms = round((t_done - t0) * 1000, 1)
+                yield _sse_event("done", {
+                    "citations": event["citations"],
+                    "token_usage": event["token_usage"],
+                    "timing": {
+                        "retrieval_ms": retrieval_ms,
+                        "generation_ms": generation_ms,
+                        "total_ms": total_ms,
+                    },
+                })
+    except Exception as e:
+        logger.error("Streaming error: %s", e)
+        yield _sse_event("error", {"message": str(e)})
 
 
 @app.post("/api/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, None, model=req.model),
+        _stream_generator(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names),
         media_type="text/event-stream",
     )
 
@@ -315,154 +292,39 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
 
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, capability, model=req.model),
+        _stream_generator(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names),
         media_type="text/event-stream",
     )
 
 
-# --- Eval endpoints (async — uses same fast pipeline as query endpoints) ---
-
-_RETRIEVAL_BATCH_SIZE = 5
-
-
-async def _eval_stream_generator(model: str | None = None):
-    """Async generator — batch retrieval evals (no LLM generation, safe to parallelize)."""
-    total_recall = 0.0
-    total_latency = 0.0
-    n = len(EVAL_QUERIES)
-
-    for batch_start in range(0, n, _RETRIEVAL_BATCH_SIZE):
-        batch = list(enumerate(EVAL_QUERIES))[batch_start:batch_start + _RETRIEVAL_BATCH_SIZE]
-
-        async def run_one(i, item):
-            query = item["query"]
-            expected = item["expected_files"]
-            t0 = time.time()
-            result = await retrieve(query, top_k=5, model=model)
-            latency_ms = round((time.time() - t0) * 1000, 1)
-            retrieved_files = []
-            seen = set()
-            for chunk in result["chunks"]:
-                fp = chunk.get("metadata", {}).get("file_path", "")
-                if fp:
-                    fname = Path(fp).name
-                    if fname not in seen:
-                        retrieved_files.append(fname)
-                        seen.add(fname)
-            recall = compute_recall_at_k(retrieved_files, expected, k=5)
-            return {
-                "index": i, "query": query,
-                "capability": item.get("capability"),
-                "recall_at_5": round(recall, 4), "latency_ms": latency_ms,
-                "retrieved_files": retrieved_files[:5], "expected_files": expected,
-            }
-
-        results = await asyncio.gather(*[run_one(i, item) for i, item in batch])
-        for r in sorted(results, key=lambda x: x["index"]):
-            total_recall += r["recall_at_5"]
-            total_latency += r["latency_ms"]
-            yield _sse_event("progress", r)
-
-    yield _sse_event("summary", {
-        "avg_recall_at_5": round(total_recall / n, 4),
-        "avg_latency_ms": round(total_latency / n, 1),
-        "total_queries": n,
-    })
-
-
-_E2E_MAX_TOKENS = 2048
-_E2E_CONTEXT_BUDGET = 3000
-
-
-async def _e2e_eval_stream_generator(model: str | None = None):
-    """Async generator — batch retrieval, then generate sequentially.
-
-    Retrieval is fast (Qdrant + embed) and safe to fully parallelize.
-    Generation runs one at a time with reduced token limits and a
-    dedicated client (max_retries=1) to avoid hidden backoff delays.
-    """
-    n = len(E2E_EVAL_QUERIES)
-    total_passed = 0
-    total_latency = 0.0
-
-    # Phase 1: batch all retrievals concurrently (fast)
-    async def run_retrieval(i, item):
-        return i, item, await retrieve(item["query"], top_k=5, model=model)
-
-    retrieval_results = await asyncio.gather(*[
-        run_retrieval(i, item) for i, item in enumerate(E2E_EVAL_QUERIES)
-    ])
-
-    # Phase 2: generate sequentially with reduced limits
-    for i, item, retrieval_result in sorted(retrieval_results, key=lambda x: x[0]):
-        query = item["query"]
-        capability = item.get("capability")
-        checks = item["checks"]
-        chunks = retrieval_result["chunks"]
-
-        t0 = time.time()
-        gen_result = await generate_answer(
-            query, chunks, capability,
-            max_completion_tokens=_E2E_MAX_TOKENS,
-            context_budget=_E2E_CONTEXT_BUDGET,
-            model=model,
-        )
-        latency_ms = round((time.time() - t0) * 1000, 1)
-
-        check_results = check_e2e_result(
-            gen_result["answer"], gen_result["citations"], checks,
-        )
-
-        if check_results["pass"]:
-            total_passed += 1
-        total_latency += latency_ms
-
-        yield _sse_event("progress", {
-            "index": i,
-            "query": query,
-            "capability": capability,
-            "passed": check_results["pass"],
-            "checks": check_results,
-            "latency_ms": latency_ms,
-            "citations": gen_result["citations"],
-            "answer_preview": gen_result["answer"][:500],
-            "answer_length": len(gen_result["answer"]),
-        })
-
-    yield _sse_event("summary", {
-        "total_queries": n,
-        "passed": total_passed,
-        "failed": n - total_passed,
-        "pass_rate": round(total_passed / n, 4) if n else 0,
-        "avg_latency_ms": round(total_latency / n, 1) if n else 0,
-    })
-
+# --- Eval endpoints ---
 
 @app.get("/api/eval/stream")
-async def eval_stream_endpoint(model: str | None = None):
+async def eval_stream_endpoint(model: str | None = None, embedding_model: str | None = None):
     return StreamingResponse(
-        _eval_stream_generator(model=model), media_type="text/event-stream",
+        eval_stream_generator(model=model, embedding_model=embedding_model),
+        media_type="text/event-stream",
     )
 
 
 @app.get("/api/eval/e2e/stream")
 async def e2e_eval_stream_endpoint(model: str | None = None):
     return StreamingResponse(
-        _e2e_eval_stream_generator(model=model), media_type="text/event-stream",
+        e2e_eval_stream_generator(model=model), media_type="text/event-stream",
     )
 
 
 # --- Model & Trial endpoints ---
 
-class TrialRequest(BaseModel):
-    model: str
-    eval_type: str
-    avg_recall_at_5: float | None = None
-    pass_rate: float | None = None
-    avg_retrieval_latency_ms: float | None = None
-    avg_e2e_latency_ms: float | None = None
-    total_queries: int | None = None
-    notes: str = ""
+@app.get("/api/embedding-models")
+async def embedding_models_endpoint():
+    from app.embedding_registry import EMBEDDING_MODELS
+    return {
+        "models": [
+            {"name": info.name, "dimensions": info.dimensions, "provider": info.provider}
+            for info in EMBEDDING_MODELS.values()
+        ]
+    }
 
 
 @app.get("/api/models")
@@ -483,12 +345,15 @@ async def create_trial_endpoint(req: TrialRequest):
         "model": req.model,
         "eval_type": req.eval_type,
         "avg_recall_at_5": req.avg_recall_at_5,
+        "avg_precision_at_5": req.avg_precision_at_5,
         "pass_rate": req.pass_rate,
         "avg_retrieval_latency_ms": req.avg_retrieval_latency_ms,
         "avg_e2e_latency_ms": req.avg_e2e_latency_ms,
         "total_queries": req.total_queries,
         "input_cost_per_1m": pricing.get("input_cost_per_1m"),
         "output_cost_per_1m": pricing.get("output_cost_per_1m"),
+        "embedding_model": req.embedding_model,
+        "embedding_dimensions": req.embedding_dimensions,
         "notes": req.notes,
     }
     trial_id = save_trial(data)
@@ -496,8 +361,11 @@ async def create_trial_endpoint(req: TrialRequest):
 
 
 @app.get("/api/trials")
-async def list_trials_endpoint():
-    return {"trials": list_trials()}
+async def list_trials_endpoint(eval_type: str | None = None):
+    trials = list_trials()
+    if eval_type:
+        trials = [t for t in trials if t.get("eval_type") == eval_type]
+    return {"trials": trials}
 
 
 @app.delete("/api/trials/{trial_id}")

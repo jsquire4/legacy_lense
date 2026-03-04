@@ -179,6 +179,15 @@ E2E_EVAL_QUERIES = [
 ]
 
 
+def compute_precision_at_k(retrieved_files: list[str], expected_files: list[str], k: int = 5) -> float:
+    """Compute Precision@K: fraction of top-K results that are relevant."""
+    if k == 0:
+        return 0.0
+    top_k = retrieved_files[:k]
+    found = sum(1 for f in top_k if f in expected_files)
+    return found / k
+
+
 def compute_recall_at_k(retrieved_files: list[str], expected_files: list[str], k: int = 5) -> float:
     """Compute Recall@K: fraction of expected files found in top-K results."""
     if not expected_files:

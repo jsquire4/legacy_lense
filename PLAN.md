@@ -1,372 +1,292 @@
-# Implementation Plan: LegacyLens
+# Refactoring Plan: God Module Decomposition + Test Fixture Debt + Frontend Dedup
 
-## Chosen Approach
+## Tactical Approach: Hybrid Bottom-Up
 
-Custom RAG pipeline (no LangChain/LlamaIndex) using Python/FastAPI, OpenAI SDK for embeddings + generation, Qdrant Cloud for vector storage, and fparser for Fortran parsing. LAPACK repository as the target codebase. Single-service deployment on Railway with a minimal web UI.
+**Rationale**: Refactor test fixtures for files with no source changes first (zero risk), then extract source modules validated by existing verbose tests, then simplify those tests, then frontend last.
 
 ---
 
-## 1. Project Structure
+## Phase 0: Baseline
 
-```
-leglen/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                # FastAPI app, routes, static mount, health check
-│   ├── config.py              # pydantic-settings, centralized env config
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── parser.py          # Fortran parsing (fparser1 + fparser2)
-│   │   ├── chunker.py         # Custom chunking logic + token enforcement
-│   │   ├── embeddings.py      # OpenAI embedding calls (centralized client)
-│   │   ├── vector_store.py    # Qdrant operations (query_points, upsert)
-│   │   ├── retrieval.py       # Query → embed → search pipeline
-│   │   ├── generation.py      # LLM answer generation with citations
-│   │   └── capabilities.py    # 4 code-understanding capabilities
-│   └── static/
-│       └── index.html         # Minimal web UI
-├── scripts/
-│   ├── ingest.py              # CLI ingestion script
-│   └── evaluate.py            # Evaluation harness (Precision@5)
-├── tests/
-│   ├── conftest.py
-│   ├── test_chunker.py
-│   ├── test_embeddings.py
-│   ├── test_vector_store.py
-│   └── test_api.py
-├── docs/
-│   ├── architecture.md
-│   └── cost_analysis.md
-├── logs/                      # JSON logs (gitignored)
-├── .env
-├── .gitignore
-├── Dockerfile
-├── requirements.txt
-└── Gauntlet_Docs/
-    ├── ll_reqs.md
-    ├── presearch.md
-    └── concept_brief.md
+### Task 0.1: Run existing test suite
+- `python -m pytest tests/ -v` — record pass count and timing.
+- All tests must pass before any changes.
+
+---
+
+## Phase 1: Test Fixture Debt — Zero-Risk Files
+
+These files have NO corresponding source changes, so fixture refactoring is purely cosmetic.
+
+### Task 1.1: `tests/test_parser.py` — Extract `tmp_fortran_file` fixture
+
+**Current state**: 15+ tests repeat `tempfile.NamedTemporaryFile` + `path.unlink()` in try/finally.
+
+**Action**: Add to `tests/conftest.py`:
+```python
+@pytest.fixture
+def tmp_fortran_file():
+    paths = []
+    def _make(content: str, suffix: str = ".f") -> Path:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(content.encode() if isinstance(content, str) else content)
+            p = Path(f.name)
+            paths.append(p)
+            return p
+    yield _make
+    for p in paths:
+        p.unlink(missing_ok=True)
 ```
 
----
+Replace all 15+ occurrences in `test_parser.py`.
 
-## 2. Implementation Tasks (Build Order)
+**Verify**: `pytest tests/test_parser.py -v`
 
-### Phase 1: Foundation (Steps 1-5) — Target: ~4 hours
+### Task 1.2: `tests/test_embeddings.py` — Extract `clear_embed_cache` fixture
 
-#### Step 1: Config + Project Scaffold
-- **Files:** `app/__init__.py`, `app/config.py`, `app/services/__init__.py`, `app/main.py` (skeleton), `requirements.txt`
-- **Details:**
-  - `config.py`: pydantic-settings `Settings` class with `OPENAI_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION_NAME`, `EMBEDDING_MODEL`, `CHAT_MODEL`, `EMBEDDING_DIM`, `MAX_CHUNK_TOKENS`
-  - `@lru_cache` on `get_settings()` — read `.env` once
-  - `main.py` skeleton: `FastAPI()` instance + `GET /health` returning `{"status": "ok"}`
-  - `requirements.txt`: fastapi, uvicorn[standard], pydantic-settings, python-dotenv, openai, qdrant-client, fparser, tiktoken, aiofiles
-- **Depends on:** Nothing
-- **Complexity:** Small
+**Current state**: 3 tests use `emb_mod._embed_cache.clear()` in try/finally.
 
-#### Step 2: Fortran Parser Service
-- **Files:** `app/services/parser.py`
-- **Details:**
-  - `ParsedUnit` dataclass: `name`, `kind` (SUBROUTINE/FUNCTION/MODULE/PROGRAM/RAW), `source_text`, `doc_comments`, `file_path`, `start_line`, `end_line`, `called_routines` (list[str])
-  - Route by extension: `.f` → fparser1 (`isfree=False, isstrict=False`), `.f90` → fparser2 (`std="f2003"`)
-  - fparser1: use `parse()` with `analyze=True`, fallback to `analyze=False`. Extract from `tree.a.external_subprogram`. Line numbers from `.item.span`
-  - fparser2: use `ParserFactory().create(std="f2003")`, walk AST for `Subroutine_Subprogram`, `Function_Subprogram`, `Module`
-  - **Graceful fallback**: if parsing fails completely, return a single `RAW` unit containing the entire file text. Never crash the ingest pipeline
-  - Extract `*>` Doxygen-style doc comments separately from code body
-- **Depends on:** Step 1
-- **Complexity:** Large — **highest risk step**, budget extra time
-- **Risk mitigation:** RAW fallback ensures ingest always completes even if parser chokes
-
-#### Step 3: Chunker Service
-- **Files:** `app/services/chunker.py`
-- **Details:**
-  - `Chunk` dataclass: `text`, `metadata` dict (file_path, unit_name, kind, start_line, end_line, chunk_index, doc_comments)
-  - `chunk_units(units: list[ParsedUnit]) -> list[Chunk]`
-  - Token counting via `tiktoken.get_encoding("cl100k_base")` — cache the encoder
-  - **Hard cap: 8191 tokens** (text-embedding-3-small limit). Enforce in the chunker, not downstream
-  - Units under cap → single chunk. Units over cap → sliding window split (500 token windows, 50 token overlap)
-  - LAPACK reality: most `.f` files are one-proc-per-file and under the cap. Windowed fallback is a safety net
-  - Embedding text format per chunk includes structured metadata header:
-    ```
-    FILE: src/dgesv.f
-    UNIT_TYPE: SUBROUTINE
-    UNIT_NAME: DGESV
-    LINES: 42-210
-    IDENTIFIERS: A, B, IPIV, INFO
-
-    <code body>
-    ```
-  - No empty chunks — validate before emitting
-- **Depends on:** Step 2 (ParsedUnit dataclass)
-- **Complexity:** Small-Medium
-- **Test-first candidate:** write chunk contract tests before implementation
-
-#### Step 4: Embedding Service
-- **Files:** `app/services/embeddings.py`
-- **Details:**
-  - Centralized OpenAI client: module-level singleton via `get_openai_client()` reading from settings
-  - `embed_texts(texts: list[str]) -> list[list[float]]`
-  - Batch up to 512 texts per API call (conservative; API limit is 2048)
-  - Validate: no empty strings, assert `len(result) == len(texts)`
-  - Use `is not None` for all response field checks (lesson from past projects)
-  - Token truncation before embedding: use tiktoken to pre-truncate to 8191 tokens
-- **Depends on:** Step 1
-- **Complexity:** Small
-- **Test-first candidate:** model name and vector dimension are load-bearing constants
-
-#### Step 5: Vector Store Service
-- **Files:** `app/services/vector_store.py`
-- **Details:**
-  - Module-level Qdrant client singleton
-  - `ensure_collection()`: check `collection_exists()`, create with `VectorParams(size=1536, distance=Distance.COSINE)` if not. Create payload indexes on `unit_type` and `file_path` for filtered search
-  - `upsert_chunks(chunks, embeddings)`: batch upsert via `upload_points()` with `batch_size=100, max_retries=3`
-  - `search(query_vector, top_k=8, filters=None)`: use `client.query_points()` (**not** deprecated `client.search()`). Return list of dicts with `score`, `text`, `metadata`
-  - Point IDs: UUID4 (simple, collision-free)
-  - Store raw chunk text in payload as `content` field for retrieval display
-- **Depends on:** Step 1
-- **Complexity:** Small-Medium
-
-### Phase 2: Pipeline Integration (Steps 6-8) — Target: ~4 hours
-
-#### Step 6: Ingest Script
-- **Files:** `scripts/ingest.py`
-- **Details:**
-  - CLI via `argparse`: `--data-dir`, `--extensions` (default `.f .f90`), `--batch-size`, `--dry-run`
-  - Walk data dir recursively, filter by extension
-  - Pipeline: `parse_file()` → `chunk_units()` → collect all chunks → `embed_texts()` → `upsert_chunks()`
-  - Progress reporting to stdout (file count, chunk count)
-  - `--dry-run`: parse + chunk only, print stats, skip API calls
-  - Call `ensure_collection()` at startup
-  - Log completion stats as structured JSON
-  - **Must complete 10k+ LOC ingestion in under 5 minutes** (requirement)
-- **Depends on:** Steps 2, 3, 4, 5
-- **Complexity:** Small (wiring) but **medium-high debugging risk** — first integration point
-
-#### Step 7: Retrieval Service
-- **Files:** `app/services/retrieval.py`
-- **Details:**
-  - `retrieve(query: str, top_k: int = 8) -> list[dict]`
-  - Embed query → vector search → return ranked results
-  - Results include score, text, and all metadata
-  - Simple and thin — all complexity is in the services it calls
-- **Depends on:** Steps 4, 5
-- **Complexity:** Small
-
-#### Step 8: Generation Service
-- **Files:** `app/services/generation.py`
-- **Details:**
-  - `generate_answer(query: str, context_chunks: list[dict], capability: str = "explain") -> dict`
-  - **Binary-search prompt truncation**: fit the largest number of complete chunks within a `MAX_CONTEXT_TOKENS` budget (~6000 tokens). Never truncate mid-chunk — drop trailing chunks
-  - System prompt enforces: technical tone, no speculation, mandatory citations as `file.f:START-END`, explicit "insufficient context" when applicable
-  - Context assembly: chunks labeled as `[SOURCE 1] file.f lines 10-80:\n<code>`
-  - Response structure: `{"answer": str, "citations": list[dict], "model": str, "token_usage": dict}`
-  - Citation enforcement: if model response lacks file references, append sources from context metadata
-  - Check `response.choices is not None` and `len(response.choices) > 0` (lesson learned)
-- **Depends on:** Step 7
-- **Complexity:** Medium — prompt engineering will iterate
-
-### Phase 3: Interface + Deploy (Steps 9-10) — Target: ~3 hours
-
-#### Step 9: FastAPI Endpoints + Web UI
-- **Files:** `app/main.py` (full), `app/static/index.html`
-- **Details:**
-  - Routes:
-    - `GET /health` → `{"status": "ok"}`
-    - `POST /api/query` → body `{"query": str, "top_k": int}`, returns `{"answer", "citations", "sources", "latency_ms"}`
-    - `POST /api/capabilities/{capability}` → same body, routes to specific capability
-    - `GET /` → serves index.html
-  - Pydantic request/response models
-  - Error handling: wrap service calls in try/except, return clean error responses
-  - CORSMiddleware enabled
-  - `index.html`: single-file vanilla HTML/CSS/JS (<150 lines). Text input, submit button, results panel showing answer + cited code snippets. `fetch("/api/query")` on submit. No framework
-  - Mount static files with `html=True` for index fallback
-- **Depends on:** Steps 7, 8
-- **Complexity:** Small-Medium
-
-#### Step 10: Railway Deployment
-- **Files:** `Dockerfile`
-- **Details:**
-  - `FROM python:3.12-slim`
-  - `COPY requirements.txt . && RUN pip install --no-cache-dir -r requirements.txt`
-  - `COPY . .`
-  - `CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}` (shell form for $PORT expansion)
-  - Set Railway env vars: `OPENAI_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY`
-  - Generate public domain in Railway dashboard
-  - **Ingest is run locally before deploy** — Railway only serves the query API
-  - Add `/health` to Railway healthcheck config
-- **Depends on:** Step 9
-- **Complexity:** Small
-
----
-
-**>>> MVP GATE — Steps 1-10 must be complete <<<**
-
----
-
-### Phase 4: Capabilities + Polish (Steps 11-15) — Target: ~6 hours
-
-#### Step 11: Code Understanding Capabilities
-- **Files:** `app/services/capabilities.py`, update routes in `app/main.py`
-- **Details:**
-  - All 4 capabilities share retrieval + generation core, differing only in system prompt
-  - `explain_code(query)` — plain-English explanation + pseudocode of retrieved procedures
-  - `generate_docs(query)` — produce structured documentation (parameters, purpose, algorithm description)
-  - `detect_patterns(query)` — identify algorithmic patterns across retrieved chunks (BLAS calls, loop structures, error handling)
-  - `map_dependencies(procedure_name)` — retrieve chunks mentioning the procedure, extract calls/called-by relationships
-  - Each wraps `generation.generate_answer()` with a specialized system prompt — minimal new code, maximum reuse
-  - Add capability selector to web UI (dropdown or tabs)
-- **Depends on:** Steps 7, 8, 9
-- **Complexity:** Medium
-
-#### Step 12: Evaluation Harness
-- **Files:** `scripts/evaluate.py`
-- **Details:**
-  - 15+ hardcoded queries covering: known routines (DGEMM, DGETRF, DGESV, DPOTRF), algorithmic questions, dependency questions, edge cases
-  - For each: call `retrieve(query, top_k=5)`, record retrieved files, measure latency
-  - Precision@5: compare retrieved files against manually-defined relevant files
-  - Output: table (query, P@5, latency_ms) + summary (mean P@5, mean latency)
-  - Write results as JSON to `logs/eval_results.json`
-  - Target: P@5 > 0.7, latency < 3s
-- **Depends on:** Steps 6, 7 (needs ingested data)
-- **Complexity:** Medium (requires knowing LAPACK to define ground truth)
-
-#### Step 13: Observability Logging
-- **Files:** add logging to all services, optional `app/logging_config.py`
-- **Details:**
-  - Custom JSON formatter for Python's `logging` module
-  - Log events: `query_received`, `retrieval_complete` (with chunk IDs + scores), `generation_complete` (with token usage), `error`
-  - Fields per query log: timestamp, query text, retrieved chunk IDs, similarity scores, latency_ms, token usage (input/output), error flags
-  - `LOG_LEVEL` from settings
-  - In production: logs to stdout (Railway captures)
-- **Depends on:** All services exist
-- **Complexity:** Small
-
-#### Step 14: Cost Analysis Document
-- **Files:** `docs/cost_analysis.md`
-- **Details:**
-  - Embedding cost: total ingested tokens × $0.02/1M (text-embedding-3-small)
-  - Query cost: avg tokens per query × $0.15/1M input + $0.60/1M output (gpt-4o-mini)
-  - Qdrant: free tier for <= 1GB; note paid tier pricing
-  - Projections for 100 / 1,000 / 10,000 / 100,000 users with stated assumptions (queries/user/day, avg tokens)
-  - Table format per the assignment requirements
-- **Depends on:** Steps 3, 8 (need real token counts)
-- **Complexity:** Small
-
-#### Step 15: Architecture Justification Document
-- **Files:** `docs/architecture.md`
-- **Details:**
-  - Justify: vector DB (Qdrant), embedding model, chunking strategy, retrieval pipeline, generation approach, deployment architecture
-  - For each: option chosen, alternatives considered, deciding factor
-  - Include ASCII architecture diagram: LAPACK → parser → chunker → embedder → Qdrant ← retriever → generator → FastAPI → Web UI
-  - Reference evaluation results as evidence
-- **Depends on:** All steps
-- **Complexity:** Small
-
----
-
-## 3. Testing Strategy
-
-### Test-First (write before implementation)
-- **Chunker**: chunk boundaries, metadata shape, no empty chunks, token cap enforcement
-- **Embeddings**: correct model name, vector dimension, batch splitting
-- **Vector store**: collection dimensions, payload metadata, `query_points` usage
-
-### Test-After
-- **Generation**: prompt engineering iterates too fast for stable tests early on
-- **FastAPI endpoints**: smoke tests after routes exist
-- **Retrieval**: mostly glue code; once sub-services are tested, this is trivial
-
-### Evaluation Harness as Integration Tests
-- 15+ queries with known-good source files
-- `pytest -m eval` runs against real APIs with ingested data
-- P@5 drop from a code change = something broke → bisect with unit tests
-- Standard tests: `pytest -m "not eval"` — fast, mocked, no API calls
-
-### Key Test Infrastructure
-- `pytest` + `pytest-mock` for unit tests
-- `FastAPI.TestClient` for endpoint smoke tests
-- `tmp_path` fixture for Fortran parsing tests (inline source snippets)
-- `conftest.py` with small LAPACK code samples
-
----
-
-## 4. Error Handling
-
-### Failure Modes
-| Failure | Where | Handling |
-|---------|-------|----------|
-| fparser crashes on a file | Parser service | Catch, log, return RAW fallback unit with entire file text |
-| Empty/comment-only file | Parser service | Return empty list, skip in ingestion |
-| Chunk exceeds token limit | Chunker | Hard cap enforced — windowed split, never exceed 8191 |
-| OpenAI rate limit (429) | Embeddings/Generation | Built-in retry in openai SDK (`max_retries=3`) + exponential backoff |
-| OpenAI timeout | Embeddings/Generation | SDK retry handles it; log the event |
-| Qdrant connection failure | Vector store | Retry with backoff; surface error to user on query path |
-| Qdrant upsert failure | Vector store | `upload_points(max_retries=3)`; log failed batch |
-| Empty retrieval results | Retrieval | Return empty list; generation handles gracefully |
-| LLM hallucinates / no citations | Generation | Citation enforcement: append sources from context metadata |
-| Context window overflow | Generation | Binary-search truncation ensures fit |
-| Railway PORT mismatch | Deployment | Shell-form CMD with `${PORT:-8000}` |
-
-### Error Boundaries
-- **Parser**: catches all exceptions per file, never crashes pipeline
-- **Ingest script**: catches per-file errors, continues with remaining files, reports failures at end
-- **API endpoints**: try/except around service calls, return structured error JSON with HTTP 500
-- **No stack traces leaked** to end users
-
----
-
-## 5. Execution Strategy
-
-### Critical Path
-```
-Config → Parser → Chunker → Ingest → Retrieval → Generation → API/UI → Deploy
-  1        2        3         6         7           8          9       10
+**Action**: Add to `tests/conftest.py`:
+```python
+@pytest.fixture
+def clear_embed_cache():
+    import app.services.embeddings as emb_mod
+    emb_mod._embed_cache.clear()
+    yield
+    emb_mod._embed_cache.clear()
 ```
 
-### Parallelizable Steps
-- Steps 2, 4, 5 can start simultaneously after Step 1
-- Step 3 can start once Step 2's `ParsedUnit` dataclass is defined
-- Steps 11, 12, 13 are fully independent post-MVP
-- Steps 14, 15 can be written any time after Step 8
+Replace the 3 try/finally blocks.
 
-### Time Budget (34 hours)
-| Phase | Steps | Target Hours | Cumulative |
-|-------|-------|-------------|------------|
-| Foundation | 1-5 | 4h | 4h |
-| Pipeline Integration | 6-8 | 4h | 8h |
-| Interface + Deploy | 9-10 | 3h | 11h |
-| **MVP GATE** | | | **~11h** |
-| Capabilities | 11 | 3h | 14h |
-| Eval + Observability | 12-13 | 3h | 17h |
-| Documentation | 14-15 | 2h | 19h |
-| Buffer / Debugging | | 5h | 24h |
-| Sleep | | ~8h | 32h |
-| Final polish / fixes | | 2h | 34h |
+**Verify**: `pytest tests/test_embeddings.py -v`
 
-### LAPACK Clone
-- Clone `Reference-LAPACK/lapack` into `data/lapack/` (gitignored)
-- Add `data/` to `.gitignore`
-- Ingest targets `data/lapack/SRC/` and `data/lapack/BLAS/SRC/`
-
-### Incremental Delivery
-1. After Step 6: verify ingest works locally with `--dry-run`, then real ingest
-2. After Step 9: test full query flow locally before deploying
-3. After Step 10: MVP deployed — everything after is additive
-4. After Step 12: run eval, iterate on prompts/chunking if P@5 is low
+### Task 1.3: Full suite check
+`pytest tests/ -v` — must match baseline.
 
 ---
 
-## 6. Definition of Done
+## Phase 2: `generation.py` — Extract `_build_llm_kwargs()`
 
-- [ ] Full LAPACK repository ingested (10k+ LOC, 50+ files)
-- [ ] Semantic search returns relevant chunks with file/line references
-- [ ] Answer generation produces citation-backed explanations
-- [ ] 4 code-understanding capabilities working (explain, docs, patterns, dependencies)
-- [ ] Web UI functional (query input → answer display with citations)
-- [ ] Deployed and publicly accessible on Railway
-- [ ] Evaluation harness: 15+ queries, P@5 > 0.7, latency < 3s
-- [ ] Structured JSON observability logging
-- [ ] Cost analysis document (100 / 1k / 10k / 100k users)
-- [ ] Architecture justification document
-- [ ] All unit tests passing
-- [ ] Clean repo with no committed secrets
+### Task 2.1: Extract shared kwargs builder
+
+**Current state**: The kwargs-building block is duplicated across 3 functions:
+- `generate_answer()` (lines 167-175)
+- `_generate_with_ttft()` (lines 221-231)
+- `generate_answer_stream()` (lines 288-298)
+
+This duplication already caused 3 bug-fix commits.
+
+**Action**: Add helper after `_build_messages()` (~line 131):
+```python
+def _build_llm_kwargs(
+    model: str, messages: list[dict],
+    max_completion_tokens: int, stream: bool = False,
+) -> dict:
+    kwargs = dict(model=model, messages=messages)
+    kwargs[_token_limit_key(model)] = max_completion_tokens
+    if is_reasoning_model(model):
+        kwargs["reasoning_effort"] = "low"
+    else:
+        kwargs["temperature"] = 0.1
+    if stream:
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+    return kwargs
+```
+
+Replace all 3 call sites with one-liners.
+
+**Verify**: `pytest tests/test_generation.py -v` — all 24 tests, especially reasoning model tests.
+
+---
+
+## Phase 3: Test Fixture Debt — `test_generation.py`
+
+### Task 3.1: Extract shared settings mock and async_iter helper
+
+**Current state**:
+- 4-line settings mock block repeated 12+ times
+- `async def async_iter(): yield chunk` closure in 9+ tests
+
+**Action**: Add to `tests/conftest.py`:
+```python
+@pytest.fixture
+def mock_gen_settings():
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    return settings
+
+def make_async_iter(*chunks):
+    async def _iter():
+        for chunk in chunks:
+            yield chunk
+    return _iter()
+```
+
+Replace all occurrences in `test_generation.py`. Tests with non-default models keep inline settings but use the fixture pattern.
+
+**Verify**: `pytest tests/test_generation.py -v`
+
+---
+
+## Phase 4: `retrieval.py` — Extract Strategy Helpers
+
+### Task 4.1: Extract 4 retrieval strategies to named helpers
+
+**Current state**: `retrieve()` is 96 lines (lines 106-201) with 4 inline strategies.
+
+**Action**: Extract above `retrieve()`:
+1. `_name_match_search()` — direct name lookup (lines 125-133)
+2. `_expansion_search()` — LLM expansion + fan-out (lines 134-147)
+3. `_call_graph_search()` — one-hop call graph follow (lines 150-167)
+4. `_caller_search()` — impact analysis caller lookup (lines 170-179)
+
+Each helper receives and mutates `seen_ids` set for deduplication (preserving existing behavior). `retrieve()` becomes a ~40-line orchestrator.
+
+**Verify**: `pytest tests/test_retrieval.py -v` — all 13 tests.
+
+---
+
+## Phase 5: Test Fixture Debt — `test_retrieval.py`
+
+### Task 5.1: Extract shared `@patch` stack as fixture
+
+**Current state**: 10/13 tests use the same 3-decorator `@patch` stack.
+
+**Action**: Add to `tests/conftest.py`:
+```python
+@pytest.fixture
+def retrieval_mocks():
+    with patch("app.services.retrieval.embed_query", new_callable=AsyncMock) as mock_embed, \
+         patch("app.services.retrieval.async_search_by_name", new_callable=AsyncMock) as mock_name, \
+         patch("app.services.retrieval.async_search", new_callable=AsyncMock) as mock_search:
+        yield {"embed": mock_embed, "name_search": mock_name, "vector_search": mock_search}
+```
+
+Replace decorator stacks in 10 tests.
+
+**Verify**: `pytest tests/test_retrieval.py -v`
+
+---
+
+## Phase 6: `main.py` — God Module Decomposition
+
+### Task 6.1: Extract Pydantic models to `app/schemas.py`
+
+**Current state**: 8 Pydantic models inline in main.py (lines 101-147 + line 484).
+
+**Action**: Create `app/schemas.py` with all 8 models. Update `main.py` imports.
+
+**Verify**: `pytest tests/test_api.py -v`
+
+### Task 6.2: Deduplicate chunk-building in `_stream_generator`
+
+**Current state**: `_build_chunk_details()` (lines 156-170) builds ChunkDetail objects, but `_stream_generator` (lines 266-278) re-implements the same logic inline.
+
+**Action**: Modify `_stream_generator` to call `_build_chunk_details()` and add the `"text"` field.
+
+**Verify**: `pytest tests/test_api.py -v` — specifically streaming tests.
+
+### Task 6.3: Extract eval generators to `app/services/eval_runner.py`
+
+**Current state**: Two 50+ line async generators in main.py:
+- `_eval_stream_generator()` (lines 339-395)
+- `_e2e_eval_stream_generator()` (lines 402-464)
+
+**Action**: Create `app/services/eval_runner.py` with both generators plus their constants (`RETRIEVAL_BATCH_SIZE`, `E2E_MAX_TOKENS`, `E2E_CONTEXT_BUDGET`) and a local `_sse_event` helper. Update main.py endpoints to import from the new module.
+
+**Critical**: Update `@patch` paths in `test_api.py` eval tests from `app.main.retrieve` → `app.services.eval_runner.retrieve` (and same for `generate_answer`).
+
+**Verify**: `pytest tests/test_api.py -v` — all eval-related tests.
+
+### Task 6.4: Full suite check
+`pytest tests/ -v`
+
+---
+
+## Phase 7: Test Fixture Debt — `test_api.py`
+
+### Task 7.1: Extract mock return value factories
+
+**Current state**: retrieve/generate mock-return dicts copy-pasted in 15+ tests.
+
+**Action**: Add to `tests/conftest.py`:
+```python
+def make_retrieve_result(chunks=None, strategy="vector", expanded_names=None):
+    if chunks is None:
+        chunks = [{"id": "abc123", "text": "test", "score": 0.9,
+                    "metadata": {"file_path": "test.f"}, "_match_type": "vector"}]
+    return {"chunks": chunks, "expanded_names": expanded_names or [], "retrieval_strategy": strategy}
+
+def make_generate_result(answer="Test answer", citations=None, model="gpt-4o-mini", token_usage=None):
+    return {"answer": answer, "citations": citations or [], "model": model, "token_usage": token_usage or {}}
+```
+
+Replace 15+ inline dicts. Tests with custom values pass overrides.
+
+**Verify**: `pytest tests/test_api.py -v`
+
+---
+
+## Phase 8: Frontend Dedup
+
+### Task 8.1: Extract shared eval runner helper in `index.html`
+
+**Current state**: `runEvals()` and `runE2EEvals()` share identical patterns (disable button, clear UI, accumulators, readSSE, progress/summary handling, re-enable button).
+
+**Action**: Extract `runEvalStream({btnId, statusId, url, onProgress, onSummary, onComplete, buildRow, ...})` helper. Both functions become thin wrappers passing their specific config.
+
+**Verify**: Manual testing — run both eval types, verify progress and summary display.
+
+---
+
+## Phase 9: Final Validation
+
+### Task 9.1: Full test suite — `pytest tests/ -v`
+### Task 9.2: Import graph check — no circular imports
+```bash
+python -c "from app.main import app; print('OK')"
+python -c "from app.services.eval_runner import eval_stream_generator; print('OK')"
+python -c "from app.schemas import QueryResponse; print('OK')"
+```
+### Task 9.3: Line count audit — verify expected reductions
+
+---
+
+## New Files
+
+| File | Purpose |
+|------|---------|
+| `app/schemas.py` | Pydantic request/response models from main.py |
+| `app/services/eval_runner.py` | Eval stream generators from main.py |
+
+## Modified Files
+
+| File | Changes |
+|------|---------|
+| `app/main.py` | Remove schemas, eval generators, dedup chunk building |
+| `app/services/generation.py` | Extract `_build_llm_kwargs()`, replace 3 call sites |
+| `app/services/retrieval.py` | Extract 4 strategy helpers, simplify `retrieve()` |
+| `app/static/index.html` | Extract `runEvalStream()` shared helper |
+| `tests/conftest.py` | Add 7 fixtures/helpers |
+| `tests/test_generation.py` | Use shared settings mock + `make_async_iter` |
+| `tests/test_api.py` | Use factories, update eval test patch paths |
+| `tests/test_parser.py` | Use `tmp_fortran_file` fixture |
+| `tests/test_retrieval.py` | Use `retrieval_mocks` fixture |
+| `tests/test_embeddings.py` | Use `clear_embed_cache` fixture |
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| Circular import from eval_runner | It imports leaf services only, not main.py. Verified by Task 9.2. |
+| Test patch paths break after extraction | Task 6.3 explicitly updates paths. Grep for old paths before committing. |
+| `_build_llm_kwargs` omits a param | Existing 24 generation tests validate all branches. |
+| `seen_ids` mutation in retrieval helpers | Passed by reference, matching existing behavior. 13 tests validate. |
+| Frontend `runEvalStream` breaks events | Manual testing required (no automated frontend tests). |
+
+## Execution Order
+
+**Sequential**: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
+
+Each phase ends with a test suite run. No phase starts until the prior phase's tests pass.

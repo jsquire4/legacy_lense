@@ -171,7 +171,7 @@ def test_sliding_window_empty_source():
     from app.services.chunker import _sliding_window_split
 
     result = _sliding_window_split("", max_tokens=50)
-    assert result == [""]
+    assert result == [("", 0)]
 
 
 def test_sliding_window_single_chunk_breaks_loop():
@@ -181,7 +181,7 @@ def test_sliding_window_single_chunk_breaks_loop():
     short = "Hello world"
     result = _sliding_window_split(short, max_tokens=100)
     assert len(result) == 1
-    assert result[0] == short
+    assert result[0] == (short, 0)
 
 
 def test_sliding_window_min_tokens_clamp():
@@ -191,8 +191,8 @@ def test_sliding_window_min_tokens_clamp():
     big = "word " * 500
     result = _sliding_window_split(big, max_tokens=50)
     assert len(result) >= 1
-    for r in result:
-        assert len(r) > 0
+    for text, tok_offset in result:
+        assert len(text) > 0
 
 
 def test_sliding_window_multiple_iterations():
@@ -202,8 +202,8 @@ def test_sliding_window_multiple_iterations():
     big = "word " * 800
     result = _sliding_window_split(big, max_tokens=80)
     assert len(result) >= 3
-    for r in result:
-        assert _count_tokens(r) <= 100
+    for text, tok_offset in result:
+        assert _count_tokens(text) <= 100
 
 
 def test_safety_truncation_when_chunk_exceeds_limit():

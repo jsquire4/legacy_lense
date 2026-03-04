@@ -1,13 +1,12 @@
 """Smoke tests for FastAPI endpoints."""
 
-import tempfile
-from pathlib import Path
 from unittest.mock import AsyncMock, patch, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES
+from tests.conftest import make_retrieve_result, make_generate_result
 
 client = TestClient(app)
 
@@ -27,19 +26,8 @@ def test_root_serves_html():
 @patch("app.main.generate_answer", new_callable=AsyncMock)
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint(mock_retrieve, mock_generate):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "abc123", "text": "test", "score": 0.9, "metadata": {"file_path": "test.f"}, "_match_type": "vector"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Test answer",
-        "citations": ["test.f:1-10"],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result()
+    mock_generate.return_value = make_generate_result(citations=["test.f:1-10"])
 
     response = client.post("/api/query", json={"query": "What is DGESV?"})
     assert response.status_code == 200
@@ -53,19 +41,10 @@ def test_query_endpoint(mock_retrieve, mock_generate):
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint_cache_hit(mock_retrieve, mock_generate):
     """Second identical query returns cached response; retrieve/generate called once."""
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "c1", "text": "cached", "score": 0.9, "metadata": {"file_path": "x.f"}, "_match_type": "vector"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Cached answer",
-        "citations": ["x.f:1-5"],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "c1", "text": "cached", "score": 0.9, "metadata": {"file_path": "x.f"}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result(answer="Cached answer", citations=["x.f:1-5"])
 
     payload = {"query": "Cache me please", "top_k": 8}
     r1 = client.post("/api/query", json=payload)
@@ -82,17 +61,10 @@ def test_query_endpoint_cache_hit(mock_retrieve, mock_generate):
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint_cache_ttl_expiry(mock_retrieve, mock_generate):
     """Cache entry expires after TTL; next request fetches fresh data (covers del path)."""
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Answer",
-        "citations": [],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result()
 
     import app.main as main_mod
 
@@ -115,17 +87,10 @@ def test_query_endpoint_cache_ttl_expiry(mock_retrieve, mock_generate):
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint_cache_eviction(mock_retrieve, mock_generate):
     """Cache evicts oldest when exceeding _CACHE_MAX."""
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Answer",
-        "citations": [],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result()
 
     import app.main as main_mod
 
@@ -142,17 +107,8 @@ def test_query_endpoint_cache_eviction(mock_retrieve, mock_generate):
 @patch("app.main.generate_answer", new_callable=AsyncMock)
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_capability_endpoint(mock_retrieve, mock_generate):
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "abc123", "text": "test", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Explained",
-        "citations": [],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result()
+    mock_generate.return_value = make_generate_result(answer="Explained")
 
     response = client.post(
         "/api/capabilities/explain_code",
@@ -221,13 +177,7 @@ def _parse_sse_events(text: str) -> list[dict]:
 @patch("app.main.generate_answer_stream")
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_stream_endpoint(mock_retrieve, mock_stream):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "abc123", "text": "test", "score": 0.9, "metadata": {"file_path": "test.f"}, "_match_type": "vector"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
+    mock_retrieve.return_value = make_retrieve_result()
 
     async def async_gen(*args, **kwargs):
         yield {"type": "token", "token": "Hello"}
@@ -251,11 +201,9 @@ def test_query_stream_endpoint(mock_retrieve, mock_stream):
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_stream_skips_unknown_event_types(mock_retrieve, mock_stream):
     """Stream generator skips events with type other than token/done (branch coverage)."""
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
+    )
 
     async def async_gen(*args, **kwargs):
         yield {"type": "unknown"}  # skipped
@@ -273,11 +221,7 @@ def test_query_stream_skips_unknown_event_types(mock_retrieve, mock_stream):
 @patch("app.main.generate_answer_stream")
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_capability_stream_endpoint(mock_retrieve, mock_stream):
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "abc123", "text": "test", "score": 0.9, "metadata": {}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
+    mock_retrieve.return_value = make_retrieve_result()
 
     async def async_gen(*args, **kwargs):
         yield {"type": "token", "token": "Explained"}
@@ -292,33 +236,31 @@ def test_capability_stream_endpoint(mock_retrieve, mock_stream):
     assert events[-1]["event"] == "done"
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
-def test_eval_stream_returns_sse(mock_retrieve):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "x1", "text": "t", "score": 0.9,
-             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
+# --- Eval tests (patches point to app.services.eval_runner) ---
 
+_EVAL_RETRIEVE = make_retrieve_result(
+    chunks=[{"id": "x1", "text": "t", "score": 0.9, "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}],
+    strategy="name_match",
+)
+
+
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
+def test_eval_stream_returns_sse(mock_retrieve):
+    mock_retrieve.return_value = _EVAL_RETRIEVE
     response = client.get("/api/eval/stream")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_eval_stream_chunks_without_file_path(mock_retrieve):
     """Eval stream handles chunks with no file_path in metadata (branch coverage)."""
-    mock_retrieve.return_value = {
-        "chunks": [
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[
             {"id": "x1", "text": "t", "score": 0.9, "metadata": {}, "_match_type": "name"},
             {"id": "x2", "text": "t", "score": 0.8, "metadata": {"file_path": "dgesv.f"}, "_match_type": "vector"},
         ],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
+    )
 
     response = client.get("/api/eval/stream")
     events = _parse_sse_events(response.text)
@@ -328,17 +270,15 @@ def test_eval_stream_chunks_without_file_path(mock_retrieve):
     assert "retrieved_files" in first
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_eval_stream_deduplicates_file_paths(mock_retrieve):
     """Eval stream deduplicates retrieved_files when multiple chunks share file_path (branch coverage)."""
-    mock_retrieve.return_value = {
-        "chunks": [
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[
             {"id": "x1", "text": "t", "score": 0.9, "metadata": {"file_path": "/path/dgesv.f"}, "_match_type": "name"},
             {"id": "x2", "text": "t2", "score": 0.85, "metadata": {"file_path": "/other/dgesv.f"}, "_match_type": "vector"},
         ],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
+    )
 
     response = client.get("/api/eval/stream")
     events = _parse_sse_events(response.text)
@@ -346,16 +286,9 @@ def test_eval_stream_deduplicates_file_paths(mock_retrieve):
     assert first_progress["retrieved_files"].count("dgesv.f") == 1
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_eval_stream_emits_progress_events(mock_retrieve):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "x1", "text": "t", "score": 0.9,
-             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
+    mock_retrieve.return_value = _EVAL_RETRIEVE
 
     response = client.get("/api/eval/stream")
     events = _parse_sse_events(response.text)
@@ -373,16 +306,9 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     assert first["index"] == 0
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_eval_stream_summary_is_last_event(mock_retrieve):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "x1", "text": "t", "score": 0.9,
-             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
+    mock_retrieve.return_value = _EVAL_RETRIEVE
 
     response = client.get("/api/eval/stream")
     events = _parse_sse_events(response.text)
@@ -395,19 +321,12 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     assert 0.0 <= summary["avg_recall_at_5"] <= 1.0
 
 
-@patch("app.main.generate_answer", new_callable=AsyncMock)
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "x1", "text": "t", "score": 0.9,
-             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
-    mock_generate.return_value = {
-        "answer": (
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    mock_generate.return_value = make_generate_result(
+        answer=(
             "DGESV solves a linear system of equations using LU factorization with partial pivoting. "
             "It calls DGETRF and DGETRS. The routine performs matrix multiplication via DGEMM and "
             "triangular solve with DTRSM. DGEQRF handles QR. The norm of the matrix is computed. "
@@ -416,10 +335,8 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
             "Loop and block optimizations improve performance. Each routine validates dimension and LDA. "
             "INFO parameter and N must be positive."
         ),
-        "citations": ["dgesv.f:1-50"],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+        citations=["dgesv.f:1-50"],
+    )
 
     response = client.get("/api/eval/e2e/stream")
     assert response.status_code == 200
@@ -446,32 +363,18 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     assert summary["total_queries"] == len(E2E_EVAL_QUERIES)
 
 
-@patch("app.main.generate_answer", new_callable=AsyncMock)
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate):
     """E2E eval stream includes progress events when checks fail (branch coverage)."""
-    mock_retrieve.return_value = {
-        "chunks": [
-            {"id": "x1", "text": "t", "score": 0.9,
-             "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}
-        ],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
-    # Answer that fails: too short, no expected keywords
-    mock_generate.return_value = {
-        "answer": "Short.",
-        "citations": [],
-        "model": "gpt-4o-mini",
-        "token_usage": {},
-    }
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    mock_generate.return_value = make_generate_result(answer="Short.")
 
     response = client.get("/api/eval/e2e/stream")
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     progress_events = [e for e in events if e["event"] == "progress"]
     assert len(progress_events) >= 1
-    # At least one should have passed=False due to our mock
     failed = [p for p in progress_events if not p["data"].get("passed", True)]
     assert len(failed) >= 1
 
@@ -488,10 +391,8 @@ def test_models_endpoint():
     names = [m["name"] for m in models]
     assert "gpt-4o-mini" in names
     assert "gpt-4o" in names
-    # Check default flag
     defaults = [m for m in models if m.get("default")]
     assert len(defaults) == 1
-    # Check pricing fields
     for m in models:
         assert "input_cost_per_1m" in m
         assert "output_cost_per_1m" in m
@@ -544,14 +445,10 @@ def test_delete_trial_not_found(mock_delete):
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint_with_model(mock_retrieve, mock_generate):
     """Query endpoint passes model param through."""
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "t.f"}, "_match_type": "vector"}],
-        "expanded_names": [],
-        "retrieval_strategy": "vector",
-    }
-    mock_generate.return_value = {
-        "answer": "Answer", "citations": [], "model": "gpt-4o", "token_usage": {},
-    }
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "t.f"}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result(model="gpt-4o")
 
     import app.main as main_mod
     main_mod._RESPONSE_CACHE.clear()
@@ -565,14 +462,10 @@ def test_query_endpoint_with_model(mock_retrieve, mock_generate):
         main_mod._RESPONSE_CACHE.clear()
 
 
-@patch("app.main.retrieve", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
 def test_eval_stream_with_model_param(mock_retrieve):
     """Eval stream endpoint accepts model query param."""
-    mock_retrieve.return_value = {
-        "chunks": [{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "dgesv.f"}, "_match_type": "name"}],
-        "expanded_names": [],
-        "retrieval_strategy": "name_match",
-    }
+    mock_retrieve.return_value = _EVAL_RETRIEVE
     response = client.get("/api/eval/stream?model=gpt-4o")
     assert response.status_code == 200
     events = _parse_sse_events(response.text)

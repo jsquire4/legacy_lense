@@ -103,7 +103,11 @@ def _parse_fixed_form(path: Path) -> list[ParsedUnit]:
 
             # Try to find actual line range
             if hasattr(item, "item") and hasattr(item.item, "span"):
-                start_line, end_line = item.item.span
+                start_line = item.item.span[0]
+                try:
+                    end_line = item.content[-1].item.span[1]
+                except (AttributeError, IndexError, TypeError):
+                    end_line = item.item.span[1]
 
             # Extract doc comments from the unit's source text only
             unit_doc = _extract_doc_comments(source_text, is_free_form=False)
@@ -126,6 +130,24 @@ def _parse_fixed_form(path: Path) -> list[ParsedUnit]:
         logger.warning("fparser1 parse failed for %s: %s — will use RAW fallback", path, e)
 
     return units
+
+
+def _get_fparser2_span(node) -> tuple[int, int] | None:
+    """Extract (start_line, end_line) from an fparser2 AST node's content items."""
+    try:
+        content = getattr(node, "content", None)
+        if not content:
+            return None
+        from fparser.two import Fortran2003
+        # Filter out Comment nodes
+        items = [item for item in content if not isinstance(item, Fortran2003.Comment)]
+        if not items:
+            return None
+        start_line = items[0].item.span[0]
+        end_line = items[-1].item.span[1]
+        return (start_line, end_line)
+    except (AttributeError, IndexError, TypeError):
+        return None
 
 
 def _parse_free_form(path: Path) -> list[ParsedUnit]:
@@ -176,14 +198,20 @@ def _parse_free_form(path: Path) -> list[ParsedUnit]:
             if m:
                 name = m.group(1).upper()
 
+            span = _get_fparser2_span(node)
+            if span:
+                start_line, end_line = span
+            else:
+                start_line, end_line = 1, len(text.splitlines())
+
             units.append(ParsedUnit(
                 name=name,
                 kind=kind,
                 source_text=source_text,
                 doc_comments=_extract_doc_comments(source_text, is_free_form=True),
                 file_path=file_str,
-                start_line=1,
-                end_line=len(text.splitlines()),
+                start_line=start_line,
+                end_line=end_line,
                 called_routines=_extract_called_routines(source_text),
             ))
     except Exception as e:

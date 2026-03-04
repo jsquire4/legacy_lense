@@ -2,6 +2,7 @@
 
 import logging
 import re
+import time
 from pathlib import Path
 
 import tiktoken
@@ -32,6 +33,22 @@ def _token_limit_key(model: str) -> str:
     return "max_tokens" if uses_legacy_max_tokens(model) else "max_completion_tokens"
 
 
+def _build_llm_kwargs(
+    model: str, messages: list[dict], max_completion_tokens: int, stream: bool = False,
+) -> dict:
+    """Build kwargs dict for chat.completions.create, handling model-specific params."""
+    kwargs = dict(model=model, messages=messages)
+    kwargs[_token_limit_key(model)] = max_completion_tokens
+    if is_reasoning_model(model):
+        kwargs["reasoning_effort"] = "low"
+    else:
+        kwargs["temperature"] = 0.1
+    if stream:
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+    return kwargs
+
+
 def _count_tokens(text: str) -> int:
     return len(_encoder.encode(text))
 
@@ -56,6 +73,13 @@ def _assemble_context(
         context_parts.append(chunk_text)
         total_tokens += chunk_tokens
 
+    # If no chunks fit within budget but chunks exist, hard-truncate the first one
+    if not context_parts and chunks:
+        first_text = chunks[0].get("text", "")
+        tokens = _encoder.encode(first_text)[:budget]
+        context_parts.append(_encoder.decode(tokens))
+        logger.warning("Hard-truncated first chunk to %d tokens (budget=%d)", len(tokens), budget)
+
     return "\n\n---\n\n".join(context_parts)
 
 
@@ -75,7 +99,7 @@ def _strip_markdown(text: str) -> str:
 def _extract_citations_from_text(text: str) -> list[str]:
     """Extract file:line citations from generated text."""
     pattern = r'[\w/.-]+\.(?:f(?:90|95|03|08)?|for|fpp):\d+(?:-\d+)?'
-    return list(set(re.findall(pattern, text)))
+    return list(set(re.findall(pattern, text, re.IGNORECASE)))
 
 
 def _build_citation_fallback(chunks: list[dict]) -> list[str]:
@@ -142,6 +166,7 @@ async def generate_answer(
     resolved_model = model or settings.CHAT_MODEL
 
     if not chunks:
+        logger.warning("No chunks retrieved for query: %.80s", query)
         return {
             "answer": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
             "citations": [],
@@ -156,16 +181,12 @@ async def generate_answer(
             client, resolved_model, messages, max_completion_tokens,
         )
     else:
-        kwargs = dict(
-            model=resolved_model,
-            messages=messages,
-        )
-        kwargs[_token_limit_key(resolved_model)] = max_completion_tokens
-        if is_reasoning_model(resolved_model):
-            kwargs["reasoning_effort"] = "low"
-        else:
-            kwargs["temperature"] = 0.1
-        response = await client.chat.completions.create(**kwargs)
+        kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens)
+        try:
+            response = await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            logger.error("LLM generation failed (model=%s): %s", resolved_model, e)
+            raise
 
         answer_text = ""
         if len(response.choices) > 0:
@@ -203,21 +224,13 @@ async def generate_answer(
 
 async def _generate_with_ttft(client, model, messages, max_completion_tokens):
     """Stream a completion and measure time-to-first-token."""
-    import time
-
     t0 = time.time()
-    kwargs = dict(
-        model=model,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    kwargs[_token_limit_key(model)] = max_completion_tokens
-    if is_reasoning_model(model):
-        kwargs["reasoning_effort"] = "low"
-    else:
-        kwargs["temperature"] = 0.1
-    stream = await client.chat.completions.create(**kwargs)
+    kwargs = _build_llm_kwargs(model, messages, max_completion_tokens, stream=True)
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        logger.error("LLM streaming (ttft) failed (model=%s): %s", model, e)
+        raise
 
     accumulated = []
     token_usage = {}
@@ -259,6 +272,7 @@ async def generate_answer_stream(
     resolved_model = model or settings.CHAT_MODEL
 
     if not chunks:
+        logger.warning("No chunks retrieved for query: %.80s", query)
         yield {
             "type": "token",
             "token": "I don't have sufficient context from the LAPACK codebase to answer this question. Try rephrasing your query or asking about a specific routine.",
@@ -268,18 +282,14 @@ async def generate_answer_stream(
 
     messages = _build_messages(query, chunks, capability, context_budget)
 
-    kwargs = dict(
-        model=resolved_model,
-        messages=messages,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    kwargs[_token_limit_key(resolved_model)] = max_completion_tokens
-    if is_reasoning_model(resolved_model):
-        kwargs["reasoning_effort"] = "low"
-    else:
-        kwargs["temperature"] = 0.1
-    stream = await client.chat.completions.create(**kwargs)
+    kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens, stream=True)
+
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        logger.error("LLM stream generation failed (model=%s): %s", resolved_model, e)
+        yield {"type": "error", "message": str(e)}
+        return
 
     accumulated = []
     token_usage = {}

@@ -1,6 +1,5 @@
 """Tests for the Fortran parser service."""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -88,76 +87,51 @@ def test_extract_called_routines_case_insensitive():
     assert "DGEMM" in result
 
 
-def test_parse_file_fixed_form(sample_f_code):
+def test_parse_file_fixed_form(sample_f_code, tmp_fortran_file):
     """parse_file parses .f files with fparser1."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(sample_f_code.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) >= 1
-        assert any(u.name == "DTEST" for u in units)
-        assert any(u.kind == "subroutine" for u in units)
-        sub = next(u for u in units if u.name == "DTEST")
-        assert "DSCAL" in sub.called_routines
-        assert "DCOPY" in sub.called_routines
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_f_code, suffix=".f")
+    units = parse_file(path)
+    assert len(units) >= 1
+    assert any(u.name == "DTEST" for u in units)
+    assert any(u.kind == "subroutine" for u in units)
+    sub = next(u for u in units if u.name == "DTEST")
+    assert "DSCAL" in sub.called_routines
+    assert "DCOPY" in sub.called_routines
 
 
-def test_parse_file_free_form(sample_f90_code):
+def test_parse_file_free_form(sample_f90_code, tmp_fortran_file):
     """parse_file parses .f90 files with fparser2."""
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(sample_f90_code.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) >= 1
-        assert any(u.name == "CTEST" for u in units)
-        assert any(u.kind == "subroutine" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_f90_code, suffix=".f90")
+    units = parse_file(path)
+    assert len(units) >= 1
+    assert any(u.name == "CTEST" for u in units)
+    assert any(u.kind == "subroutine" for u in units)
 
 
-def test_parse_file_unknown_suffix_raw_fallback():
+def test_parse_file_unknown_suffix_raw_fallback(tmp_fortran_file):
     """parse_file returns RAW unit for unknown suffix."""
-    with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as f:
-        f.write(b"some random text\nX = 1")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].kind == "raw"
-        assert units[0].name == path.stem.upper()
-        assert "some random text" in units[0].source_text
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"some random text\nX = 1", suffix=".xyz")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].kind == "raw"
+    assert units[0].name == path.stem.upper()
+    assert "some random text" in units[0].source_text
 
 
-def test_parse_file_raw_fallback_on_parse_failure():
+def test_parse_file_raw_fallback_on_parse_failure(tmp_fortran_file):
     """parse_file falls back to RAW when parser fails."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"this is not valid fortran {{{")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].kind == "raw"
-        assert "this is not valid" in units[0].source_text
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"this is not valid fortran {{{", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].kind == "raw"
+    assert "this is not valid" in units[0].source_text
 
 
-def test_parse_file_f95_suffix(sample_f90_code):
+def test_parse_file_f95_suffix(sample_f90_code, tmp_fortran_file):
     """parse_file handles .f95 as free-form."""
-    with tempfile.NamedTemporaryFile(suffix=".f95", delete=False) as f:
-        f.write(sample_f90_code.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) >= 1
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_f90_code, suffix=".f95")
+    units = parse_file(path)
+    assert len(units) >= 1
 
 
 SAMPLE_FORTRAN_FUNCTION = """\
@@ -192,156 +166,100 @@ end program main
 """
 
 
-def test_parse_file_function():
+def test_parse_file_function(tmp_fortran_file):
     """parse_file parses FUNCTION in fixed-form."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(SAMPLE_FORTRAN_FUNCTION.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "function" for u in units)
-        assert any(u.name == "DNRM2" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(SAMPLE_FORTRAN_FUNCTION, suffix=".f")
+    units = parse_file(path)
+    assert any(u.kind == "function" for u in units)
+    assert any(u.name == "DNRM2" for u in units)
 
 
-def test_parse_file_module_free_form():
+def test_parse_file_module_free_form(tmp_fortran_file):
     """parse_file parses MODULE in free-form."""
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(SAMPLE_FORTRAN_MODULE.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "module" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(SAMPLE_FORTRAN_MODULE, suffix=".f90")
+    units = parse_file(path)
+    assert any(u.kind == "module" for u in units)
 
 
-def test_parse_file_function_free_form():
+def test_parse_file_function_free_form(tmp_fortran_file):
     """parse_file parses FUNCTION in free-form (line 160)."""
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(SAMPLE_FORTRAN_F90_FUNCTION.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "function" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(SAMPLE_FORTRAN_F90_FUNCTION, suffix=".f90")
+    units = parse_file(path)
+    assert any(u.kind == "function" for u in units)
 
 
-def test_parse_file_program_free_form():
+def test_parse_file_program_free_form(tmp_fortran_file):
     """parse_file parses PROGRAM in free-form (line 162)."""
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(SAMPLE_FORTRAN_F90_PROGRAM.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "program" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(SAMPLE_FORTRAN_F90_PROGRAM, suffix=".f90")
+    units = parse_file(path)
+    assert any(u.kind == "program" for u in units)
 
 
 @patch("app.services.parser._parse_fixed_form")
-def test_parse_file_empty_units_uses_raw_fallback(mock_parse):
+def test_parse_file_empty_units_uses_raw_fallback(mock_parse, tmp_fortran_file):
     """When parser returns empty units, parse_file uses RAW fallback."""
     mock_parse.return_value = []
-
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"      SUBROUTINE FOO\n      END\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].kind == "raw"
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"      SUBROUTINE FOO\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].kind == "raw"
 
 
-def test_parse_file_block_data(sample_block_data):
+def test_parse_file_block_data(sample_block_data, tmp_fortran_file):
     """parse_file parses BLOCK DATA in fixed-form."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(sample_block_data.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "block_data" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_block_data, suffix=".f")
+    units = parse_file(path)
+    assert any(u.kind == "block_data" for u in units)
 
 
-def test_parse_file_program(sample_program):
+def test_parse_file_program(sample_program, tmp_fortran_file):
     """parse_file parses PROGRAM in fixed-form."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(sample_program.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "program" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_program, suffix=".f")
+    units = parse_file(path)
+    assert any(u.kind == "program" for u in units)
 
 
-def test_parse_file_module_fixed_form(sample_fixed_form_module):
+def test_parse_file_module_fixed_form(sample_fixed_form_module, tmp_fortran_file):
     """parse_file parses MODULE in fixed-form (lines 93-94)."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(sample_fixed_form_module.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "module" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_fixed_form_module, suffix=".f")
+    units = parse_file(path)
+    assert any(u.kind == "module" for u in units)
 
 
-def test_parse_file_fixed_form_item_span_from_real_parser(sample_f_code):
+def test_parse_file_fixed_form_item_span_from_real_parser(sample_f_code, tmp_fortran_file):
     """Real fparser returns items with item.span; parser uses it (lines 105-106)."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(sample_f_code.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        sub = next(u for u in units if u.name == "DTEST")
-        assert sub.start_line >= 1
-        assert sub.end_line >= sub.start_line
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(sample_f_code, suffix=".f")
+    units = parse_file(path)
+    sub = next(u for u in units if u.name == "DTEST")
+    assert sub.start_line >= 1
+    assert sub.end_line >= sub.start_line
 
 
-def test_parse_free_form_exception_fallback():
+def test_parse_free_form_exception_fallback(tmp_fortran_file):
     """Parser falls back to RAW when fparser2 raises (lines 189-190)."""
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(b"invalid syntax {{{ ]]]\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].kind == "raw"
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"invalid syntax {{{ ]]]\n", suffix=".f90")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].kind == "raw"
 
 
 @patch("fparser.two.utils.walk")
-def test_parse_free_form_unknown_kind_and_name(mock_walk):
+def test_parse_free_form_unknown_kind_and_name(mock_walk, tmp_fortran_file):
     """Parser handles unknown node type and regex miss (lines 166, 189-190)."""
     mock_node = MagicMock()
     mock_node.__class__.__name__ = "Interface_Block"
     mock_node.__str__ = lambda self: "xyz"
     mock_walk.return_value = [mock_node]
 
-    with tempfile.NamedTemporaryFile(suffix=".f90", delete=False) as f:
-        f.write(b"subroutine x\nend subroutine\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].kind == "unknown"
-        assert units[0].name == "unknown"
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"subroutine x\nend subroutine\n", suffix=".f90")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].kind == "unknown"
+    assert units[0].name == "unknown"
 
 
 @patch("app.services.parser._parse_fixed_form")
-def test_parse_fixed_form_skips_unknown_block_types(mock_parse):
+def test_parse_fixed_form_skips_unknown_block_types(mock_parse, tmp_fortran_file):
     """Parser skips (continue) block content items with unknown type (lines 95-96)."""
     from app.services.parser import ParsedUnit
 
@@ -358,30 +276,20 @@ def test_parse_fixed_form_skips_unknown_block_types(mock_parse):
         )
     ]
 
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"      SUBROUTINE MOCK\n      END\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"      SUBROUTINE MOCK\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
 
 
-def test_parse_fixed_form_module_via_real_parser():
+def test_parse_fixed_form_module_via_real_parser(tmp_fortran_file):
     """Use real parser: module hits 93-94; mixed block may hit 95-96."""
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(SAMPLE_FIXED_FORM_MODULE.encode())
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert any(u.kind == "module" for u in units)
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(SAMPLE_FIXED_FORM_MODULE, suffix=".f")
+    units = parse_file(path)
+    assert any(u.kind == "module" for u in units)
 
 
 @patch("fparser.one.parsefortran.FortranParser")
-def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls):
+def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls, tmp_fortran_file):
     """Parser uses item.item.span (105-106); skips unknown block types (95-96)."""
     sub_item = MagicMock()
     sub_item.name = "SPANSUB"
@@ -389,6 +297,10 @@ def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls):
     sub_item.__str__ = lambda self: "      SUBROUTINE SPANSUB\n      END"
     sub_item.item = MagicMock()
     sub_item.item.span = (5, 10)
+    # Set up content[-1].item.span for end_line extraction
+    end_stmt = MagicMock()
+    end_stmt.item.span = (9, 10)
+    sub_item.content = [sub_item.item, end_stmt]
 
     unknown_item = MagicMock()
     unknown_item.__class__.__name__ = "Include"  # doesn't match subroutine/function/program/blockdata/module
@@ -401,20 +313,15 @@ def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls):
     mock_parser.block = mock_block
     mock_parser_cls.return_value = mock_parser
 
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"      SUBROUTINE SPANSUB\n      END\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].start_line == 5
-        assert units[0].end_line == 10
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"      SUBROUTINE SPANSUB\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].start_line == 5
+    assert units[0].end_line == 10
 
 
 @patch("fparser.one.parsefortran.FortranParser")
-def test_parse_fixed_form_item_no_span_uses_default_lines(mock_parser_cls):
+def test_parse_fixed_form_item_no_span_uses_default_lines(mock_parser_cls, tmp_fortran_file):
     """Parser uses default start_line/end_line when item has no span (branch coverage)."""
     sub_item = MagicMock()
     sub_item.name = "NOSPAN"
@@ -429,20 +336,15 @@ def test_parse_fixed_form_item_no_span_uses_default_lines(mock_parser_cls):
     mock_parser.block = mock_block
     mock_parser_cls.return_value = mock_parser
 
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"      SUBROUTINE NOSPAN\n      END\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert units[0].start_line == 1
-        assert units[0].end_line == 2
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"      SUBROUTINE NOSPAN\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].start_line == 1
+    assert units[0].end_line == 2
 
 
 @patch("fparser.one.parsefortran.FortranParser")
-def test_parse_fixed_form_unit_doc_fallback_to_full_file(mock_parser_cls):
+def test_parse_fixed_form_unit_doc_fallback_to_full_file(mock_parser_cls, tmp_fortran_file):
     """Parser tries full file for doc when unit source has no docs (branch coverage)."""
     sub_item = MagicMock()
     sub_item.name = "NODOC"
@@ -460,20 +362,15 @@ def test_parse_fixed_form_unit_doc_fallback_to_full_file(mock_parser_cls):
     mock_parser_cls.return_value = mock_parser
 
     file_content = b"*> \\brief NODOC does something\n      SUBROUTINE NODOC\n      X=1\n      END\n"
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(file_content)
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        # Unit source has no *> so unit_doc empty; we try full file
-        assert "NODOC" in units[0].doc_comments or "something" in units[0].doc_comments or units[0].doc_comments == ""
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(file_content, suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    # Unit source has no *> so unit_doc empty; we try full file
+    assert units[0].doc_comments == "" or "NODOC" in units[0].doc_comments
 
 
 @patch("fparser.one.parsefortran.FortranParser")
-def test_parse_fixed_form_unit_has_doc_skips_full_file(mock_parser_cls):
+def test_parse_fixed_form_unit_has_doc_skips_full_file(mock_parser_cls, tmp_fortran_file):
     """Parser skips full-file doc extraction when unit source has docs (branch coverage)."""
     sub_item = MagicMock()
     sub_item.name = "HASDOC"
@@ -490,18 +387,13 @@ def test_parse_fixed_form_unit_has_doc_skips_full_file(mock_parser_cls):
     mock_parser.block = mock_block
     mock_parser_cls.return_value = mock_parser
 
-    with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-        f.write(b"      SUBROUTINE HASDOC\n      X=1\n      END\n")
-        path = Path(f.name)
-    try:
-        units = parse_file(path)
-        assert len(units) == 1
-        assert "HASDOC" in units[0].doc_comments or "work" in units[0].doc_comments
-    finally:
-        path.unlink()
+    path = tmp_fortran_file(b"      SUBROUTINE HASDOC\n      X=1\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert "HASDOC" in units[0].doc_comments or "work" in units[0].doc_comments
 
 
-def test_parse_file_block_none_raises_then_raw_fallback():
+def test_parse_file_block_none_raises_then_raw_fallback(tmp_fortran_file):
     """When fparser1 returns block=None, ValueError is raised and RAW fallback used."""
     with patch("fparser.one.parsefortran.FortranParser") as MockParser:
         mock_instance = MagicMock()
@@ -509,12 +401,7 @@ def test_parse_file_block_none_raises_then_raw_fallback():
         mock_instance.parse.return_value = None
         MockParser.return_value = mock_instance
 
-        with tempfile.NamedTemporaryFile(suffix=".f", delete=False) as f:
-            f.write(b"      SUBROUTINE FOO\n      END\n")
-            path = Path(f.name)
-        try:
-            units = parse_file(path)
-            assert len(units) == 1
-            assert units[0].kind == "raw"
-        finally:
-            path.unlink()
+        path = tmp_fortran_file(b"      SUBROUTINE FOO\n      END\n", suffix=".f")
+        units = parse_file(path)
+        assert len(units) == 1
+        assert units[0].kind == "raw"

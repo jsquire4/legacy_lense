@@ -104,7 +104,7 @@ See [docs/architecture.md](docs/architecture.md) for full details.
 ## Evaluation
 
 ### Retrieval Evals (37 queries)
-- Recall@5 and latency per query
+- Precision@5, Recall@5, and latency per query
 - Embedding-based, model-independent
 
 ### E2E Generation Evals (21 queries)

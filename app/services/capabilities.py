@@ -55,7 +55,7 @@ Rules:
 - Be concise. Give direct, dense answers — no filler, no preamble, no restating the question.
 - List all routines called by the target routine (CALL statements).
 - Explain what each called routine does and why it's needed.
-- Identify the dependency chain (caller → callees → their callees).
+- Identify the dependency chain (caller → immediate callees).
 - Note any BLAS routines used and their roles.
 - Always cite specific source files with line references: filename.f:START-END
 - If the context is insufficient, say so explicitly.""",

@@ -18,15 +18,25 @@ CREATE TABLE IF NOT EXISTS trials (
     model TEXT NOT NULL,
     eval_type TEXT NOT NULL,
     avg_recall_at_5 REAL,
+    avg_precision_at_5 REAL,
     pass_rate REAL,
     avg_retrieval_latency_ms REAL,
     avg_e2e_latency_ms REAL,
     total_queries INTEGER,
     input_cost_per_1m REAL,
     output_cost_per_1m REAL,
+    embedding_model TEXT,
+    embedding_dimensions INTEGER,
     notes TEXT DEFAULT ''
 )
 """
+
+
+_MIGRATIONS = [
+    ("avg_precision_at_5", "ALTER TABLE trials ADD COLUMN avg_precision_at_5 REAL"),
+    ("embedding_model", "ALTER TABLE trials ADD COLUMN embedding_model TEXT"),
+    ("embedding_dimensions", "ALTER TABLE trials ADD COLUMN embedding_dimensions INTEGER"),
+]
 
 
 def _get_conn(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -34,6 +44,14 @@ def _get_conn(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute(_CREATE_TABLE)
+    # Migrate existing tables: add new columns if missing
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(trials)").fetchall()}
+    for col_name, ddl in _MIGRATIONS:
+        if col_name not in existing_cols:
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # column already exists (race)
     return conn
 
 
@@ -43,21 +61,24 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
     try:
         cursor = conn.execute(
             """INSERT INTO trials
-               (created_at, model, eval_type, avg_recall_at_5, pass_rate,
+               (created_at, model, eval_type, avg_recall_at_5, avg_precision_at_5, pass_rate,
                 avg_retrieval_latency_ms, avg_e2e_latency_ms, total_queries,
-                input_cost_per_1m, output_cost_per_1m, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                input_cost_per_1m, output_cost_per_1m, embedding_model, embedding_dimensions, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("created_at", datetime.now(timezone.utc).isoformat()),
                 data["model"],
                 data["eval_type"],
                 data.get("avg_recall_at_5"),
+                data.get("avg_precision_at_5"),
                 data.get("pass_rate"),
                 data.get("avg_retrieval_latency_ms"),
                 data.get("avg_e2e_latency_ms"),
                 data.get("total_queries"),
                 data.get("input_cost_per_1m"),
                 data.get("output_cost_per_1m"),
+                data.get("embedding_model"),
+                data.get("embedding_dimensions"),
                 data.get("notes", ""),
             ),
         )

@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+_STANDARD_LOG_ATTRS = frozenset(
+    logging.LogRecord("", 0, "", 0, "", (), None).__dict__.keys()
+)
+
+
 class JSONFormatter(logging.Formatter):
     """Format log records as single-line JSON."""
 
@@ -20,10 +25,10 @@ class JSONFormatter(logging.Formatter):
         }
         if record.exc_info and record.exc_info[0] is not None:
             log_entry["exception"] = self.formatException(record.exc_info)
-        for key in ("query", "chunk_ids", "scores", "latency_ms", "token_usage"):
-            if hasattr(record, key):
-                log_entry[key] = getattr(record, key)
-        return json.dumps(log_entry)
+        for key, value in record.__dict__.items():
+            if key not in _STANDARD_LOG_ATTRS and key not in log_entry:
+                log_entry[key] = value
+        return json.dumps(log_entry, default=str)
 
 
 def setup_logging(level: str = "INFO"):

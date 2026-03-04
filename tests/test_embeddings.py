@@ -94,6 +94,9 @@ def test_get_openai_client_returns_client(mock_settings):
         get_openai_client.cache_clear()
 
 
+# --- Tests below use clear_embed_cache fixture ---
+
+
 @patch("app.services.embeddings.get_openai_client")
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_raises_on_count_mismatch(mock_settings, mock_client_fn):
@@ -138,7 +141,7 @@ def test_get_async_openai_client_returns_client(mock_settings):
 @patch("app.services.embeddings.get_async_openai_client")
 @patch("app.services.embeddings.get_settings")
 @pytest.mark.asyncio
-async def test_embed_query_calls_api(mock_settings, mock_client_fn):
+async def test_embed_query_calls_api(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query calls API and caches result."""
     settings = MagicMock()
     settings.EMBEDDING_MODEL = "text-embedding-3-small"
@@ -154,22 +157,16 @@ async def test_embed_query_calls_api(mock_settings, mock_client_fn):
     mock_client.embeddings.create = AsyncMock(return_value=mock_response)
     mock_client_fn.return_value = mock_client
 
-    import app.services.embeddings as emb_mod
-
-    emb_mod._embed_cache.clear()
-    try:
-        result = await embed_query("test query for embedding")
-        assert len(result) == 1536
-        assert result[0] == 0.2
-        mock_client.embeddings.create.assert_called_once()
-    finally:
-        emb_mod._embed_cache.clear()
+    result = await embed_query("test query for embedding")
+    assert len(result) == 1536
+    assert result[0] == 0.2
+    mock_client.embeddings.create.assert_called_once()
 
 
 @patch("app.services.embeddings.get_async_openai_client")
 @patch("app.services.embeddings.get_settings")
 @pytest.mark.asyncio
-async def test_embed_query_cache_hit(mock_settings, mock_client_fn):
+async def test_embed_query_cache_hit(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query returns cached result on repeat query, no API call."""
     settings = MagicMock()
     settings.EMBEDDING_MODEL = "text-embedding-3-small"
@@ -185,33 +182,22 @@ async def test_embed_query_cache_hit(mock_settings, mock_client_fn):
     mock_client.embeddings.create = AsyncMock(return_value=mock_response)
     mock_client_fn.return_value = mock_client
 
-    import app.services.embeddings as emb_mod
-
-    emb_mod._embed_cache.clear()
-    try:
-        r1 = await embed_query("cached query")
-        r2 = await embed_query("cached query")
-        assert r1 == r2
-        mock_client.embeddings.create.assert_called_once()
-    finally:
-        emb_mod._embed_cache.clear()
+    r1 = await embed_query("cached query")
+    r2 = await embed_query("cached query")
+    assert r1 == r2
+    mock_client.embeddings.create.assert_called_once()
 
 
 @patch("app.services.embeddings._EMBED_CACHE_MAX", 2)
 @patch("app.services.embeddings.get_async_openai_client")
 @patch("app.services.embeddings.get_settings")
 @pytest.mark.asyncio
-async def test_embed_query_cache_eviction(mock_settings, mock_client_fn):
+async def test_embed_query_cache_eviction(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query evicts oldest when cache is full."""
     settings = MagicMock()
     settings.EMBEDDING_MODEL = "text-embedding-3-small"
     settings.MAX_CHUNK_TOKENS = 8191
     mock_settings.return_value = settings
-
-    def make_response(text):
-        mock_emb = MagicMock()
-        mock_emb.embedding = [hash(text) % 1000 / 1000.0] * 1536
-        return MagicMock(data=[mock_emb])
 
     mock_client = AsyncMock()
     mock_client.embeddings.create = AsyncMock(return_value=MagicMock(data=[MagicMock(embedding=[0.0] * 1536)]))
@@ -222,14 +208,10 @@ async def test_embed_query_cache_eviction(mock_settings, mock_client_fn):
 
     import app.services.embeddings as emb_mod
 
-    emb_mod._embed_cache.clear()
-    try:
-        await embed_query("query1")
-        await embed_query("query2")
-        await embed_query("query3")  # Should evict query1
-        assert "query1" not in emb_mod._embed_cache
-        assert "query2" in emb_mod._embed_cache
-        assert "query3" in emb_mod._embed_cache
-        assert mock_client.embeddings.create.call_count == 3
-    finally:
-        emb_mod._embed_cache.clear()
+    await embed_query("query1")
+    await embed_query("query2")
+    await embed_query("query3")  # Should evict query1
+    assert ("text-embedding-3-small", "query1") not in emb_mod._embed_cache
+    assert ("text-embedding-3-small", "query2") in emb_mod._embed_cache
+    assert ("text-embedding-3-small", "query3") in emb_mod._embed_cache
+    assert mock_client.embeddings.create.call_count == 3

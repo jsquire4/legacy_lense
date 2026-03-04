@@ -75,6 +75,13 @@ On startup, the app pre-caches responses for 7 default queries across 3 cheap mo
 - Call-graph following retrieves implementation dependencies (one hop) for better context
 - Vector similarity fills remaining slots for broad coverage
 
+### Why text-embedding-3-small?
+- Best cost/quality tradeoff for code-heavy corpus: $0.02/1M tokens
+- 1536 dimensions — half the size of text-embedding-3-large (3072d), lower storage cost in Qdrant
+- MTEB benchmark scores within ~2% of text-embedding-3-large for retrieval tasks
+- text-embedding-ada-002 (same 1536d) costs 5x more with lower quality
+- Multi-model support allows ingesting with text-embedding-3-large for comparison via `--embedding-model` flag
+
 ### Why no framework (LangChain, LlamaIndex)?
 - Custom pipeline maximizes understanding of RAG mechanics
 - Direct use of OpenAI SDK + Qdrant client keeps dependencies minimal
@@ -113,7 +120,7 @@ User Query
 
 ### Retrieval Evals (37 queries)
 - Tests that the right files are retrieved per capability domain
-- Measures Recall@5 and retrieval latency
+- Measures Precision@5, Recall@5, and retrieval latency
 - Embedding-based — model-independent
 
 ### E2E Generation Evals (21 queries)

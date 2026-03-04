@@ -77,7 +77,7 @@ Assumptions: 0.5 queries per user per day, 30 days/month. ~60% of queries trigge
 
 ## Cost Optimization (Already Implemented)
 
-1. **Response caching**: LRU cache (512 entries) avoids redundant LLM calls
+1. **Response caching**: LRU cache (64 entries, 5-min TTL) avoids redundant LLM calls
 2. **Cache warming**: 21 pre-cached responses (7 queries x 3 cheap models) on startup
 3. **Expansion gating**: Skip LLM expansion for queries that already contain routine names
 4. **Model selection**: Users choose cost/quality tradeoff per query

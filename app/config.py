@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     QDRANT_URL: str
     QDRANT_API_KEY: str = ""
-    QDRANT_COLLECTION_NAME: str = "lapack"
+    QDRANT_COLLECTION_NAME: str = "lapack-text-embedding-3-small"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     CHAT_MODEL: str = "gpt-4.1-nano"
     EMBEDDING_DIM: int = 1536

@@ -109,8 +109,13 @@ async def ingest_stream_generator(embedding_model: str):
             texts = [c.text for c in batch]
 
             batch_t0 = time.time()
-            embeddings = await asyncio.to_thread(embed_texts, texts, embedding_model)
-            await asyncio.to_thread(upsert_chunks, batch, embeddings, target_collection)
+            try:
+                embeddings = await asyncio.to_thread(embed_texts, texts, embedding_model)
+                await asyncio.to_thread(upsert_chunks, batch, embeddings, target_collection)
+            except Exception as e:
+                logger.error("Embedding/upsert failed at batch %d: %s", i, e)
+                yield _sse_event("error", {"message": f"Embedding failed: {e}"})
+                return
             batch_elapsed = time.time() - batch_t0
 
             total_upserted += len(batch)

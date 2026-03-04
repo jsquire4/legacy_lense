@@ -159,11 +159,15 @@ async def test_ingest_embed_error(
 
         mock_embed.side_effect = RuntimeError("API key invalid")
 
-        # embed_texts error propagates through asyncio.to_thread uncaught
-        with pytest.raises(RuntimeError, match="API key invalid"):
-            await collect_sse_events(
-                ingest_stream_generator("text-embedding-3-small")
-            )
+        events = await collect_sse_events(
+            ingest_stream_generator("text-embedding-3-small")
+        )
+
+    event_types = [e["event"] for e in events]
+    assert "progress" in event_types  # parsing progress emitted before failure
+    assert "error" in event_types
+    assert "API key invalid" in events[-1]["data"]["message"]
+    assert "summary" not in event_types
 
 
 @pytest.mark.asyncio

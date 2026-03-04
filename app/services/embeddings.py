@@ -113,7 +113,7 @@ def _get_async_cohere_client():
 # ---------------------------------------------------------------------------
 
 _OPENAI_BATCH = 512
-_VOYAGE_BATCH = 128
+_VOYAGE_BATCH = 50
 _GEMINI_BATCH = 100
 _COHERE_BATCH = 96
 

@@ -466,6 +466,7 @@
                 <textarea id="query" placeholder="e.g., What does the DGESV subroutine do?" rows="2"></textarea>
                 <div class="query-input-bar">
                     <span style="flex:1"></span>
+                    <select id="query-emb-select" class="model-select" title="Embedding model (collection)"><option value="">Loading...</option></select>
                     <select id="model-select" class="model-select"><option value="">Loading...</option></select>
                     <button id="submit" onclick="submitQuery()">Ask</button>
                 </div>
@@ -528,6 +529,7 @@
         <div class="panel">
             <h2 class="panel-title">E2E Generation Evals <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
             <div class="eval-controls">
+                <select id="e2e-emb-select" class="model-select" title="Embedding model (collection)"><option value="">Loading...</option></select>
                 <select id="e2e-model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="e2e-btn" onclick="runE2EEvals()">Run E2E</button>
                 <span class="eval-status" id="e2e-status"></span>
@@ -649,12 +651,10 @@
         let selectedCapability = "";
         let queryModel = "";
         let e2eModel = "";
-        const _CACHED_MODELS = new Set(["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano"]);
+        const _CACHED_MODELS = new Set(["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano", "gemini-2.0-flash", "gemini-2.5-flash"]);
         let retAvgLatency = JSON.parse(localStorage.getItem("retAvgLatency"));
         let retAvgRecall = JSON.parse(localStorage.getItem("retAvgRecall"));
         let retRunCount = JSON.parse(localStorage.getItem("retRunCount")) || 0;
-        let lastRetrievalSummary = null;
-        let lastE2ESummary = null;
 
         // --- Prefetch query expansion ---
         let prefetchedExpansion = null;   // { names: [...], queryText: "..." }
@@ -821,7 +821,7 @@
             const expSection = document.getElementById("obs-expansion-section");
             if (rd.expanded_names && rd.expanded_names.length > 0) {
                 expSection.style.display = "block";
-                document.getElementById("obs-expansion").innerHTML = rd.expanded_names.map(n => `<span>${n}</span>`).join("");
+                document.getElementById("obs-expansion").innerHTML = rd.expanded_names.map(n => `<span>${escHtml(n)}</span>`).join("");
             } else { expSection.style.display = "none"; }
 
             const chunks = (rd.chunks || []);
@@ -846,7 +846,7 @@
             chunks.forEach((c, i) => {
                 const item = document.createElement("div");
                 item.className = "chunk-item";
-                item.innerHTML = `<span class="chunk-file"><span class="chunk-rank">#${c.rank}</span>${c.file_name}</span><div class="chunk-meta"><span style="font-family:monospace">${c.routine_name}</span><span>${c.score.toFixed(4)}</span><span class="badge ${badgeClass(c.match_type)}">${c.match_type}</span></div>`;
+                item.innerHTML = `<span class="chunk-file"><span class="chunk-rank">#${c.rank}</span>${escHtml(c.file_name)}</span><div class="chunk-meta"><span style="font-family:monospace">${escHtml(c.routine_name)}</span><span>${c.score.toFixed(4)}</span><span class="badge ${badgeClass(c.match_type)}">${escHtml(c.match_type)}</span></div>`;
                 item.addEventListener("click", () => selectChunk(c, item));
                 sidebar.appendChild(item);
                 if (i === 0) selectChunk(c, item);
@@ -866,7 +866,7 @@
                     if (line.startsWith("event: ")) event = line.slice(7);
                     else if (line.startsWith("data: ")) data = line.slice(6);
                 }
-                if (event && data) { try { events.push({ event, data: JSON.parse(data) }); } catch {} }
+                if (event && data) { try { events.push({ event, data: JSON.parse(data) }); } catch (e) { console.warn("SSE parse error", e); } }
             }
             return events;
         }
@@ -927,14 +927,14 @@
                         <div class="file-list">
                             ${[...expected].map(f => {
                                 const cls = foundFiles.includes(f) ? "found" : "missing";
-                                return `<span class="file-tag ${cls}">${cls === "found" ? "&#10003;" : "&#10007;"} ${f}</span>`;
+                                return `<span class="file-tag ${cls}">${cls === "found" ? "&#10003;" : "&#10007;"} ${escHtml(f)}</span>`;
                             }).join("")}
                         </div>
                     </div>
                     <div class="detail-section">
                         <div class="detail-label">Retrieved Files (top 5)</div>
                         <div class="file-list">
-                            ${retrieved.map(f => `<span class="file-tag retrieved">${f}</span>`).join("")}
+                            ${retrieved.map(f => `<span class="file-tag retrieved">${escHtml(f)}</span>`).join("")}
                         </div>
                     </div>
                 </div>
@@ -956,7 +956,7 @@
             if ("min_answer_length" in checks)
                 checkItems.push(`<span class="check-item ${checks.min_answer_length ? "check-pass" : "check-fail"}">length: ${data.answer_length} chars</span>`);
             if ("keywords_pass" in checks) {
-                const found = (checks.keywords_found || []).join(", ") || "none";
+                const found = escHtml((checks.keywords_found || []).join(", ") || "none");
                 checkItems.push(`<span class="check-item ${checks.keywords_pass ? "check-pass" : "check-fail"}">keywords: ${found}</span>`);
             }
 
@@ -1031,7 +1031,6 @@
             const submitBtn = document.getElementById("submit");
             const spinner = document.getElementById("spinner");
             const resultDiv = document.getElementById("result");
-            const answerRaw = document.getElementById("answer-raw");
             const answerMd = document.getElementById("answer-md");
             const citationsDiv = document.getElementById("citations");
             const citationsBox = document.getElementById("citations-box");
@@ -1039,7 +1038,6 @@
             submitBtn.disabled = true;
             spinner.classList.add("visible");
             resultDiv.classList.remove("visible");
-            answerRaw.style.display = "none";
             answerMd.style.display = "block";
             answerMd.innerHTML = "";
             citationsDiv.innerHTML = "";
@@ -1052,6 +1050,8 @@
                 const url = selectedCapability ? `/api/capabilities/${selectedCapability}/stream` : "/api/query/stream";
                 const body = { query };
                 if (queryModel) body.model = queryModel;
+                const selectedEmbModel = document.getElementById("query-emb-select").value;
+                if (selectedEmbModel) body.embedding_model = selectedEmbModel;
                 // Attach prefetched expansion if available and matches current query
                 if (prefetchedExpansion && prefetchedExpansion.queryText === query) {
                     body.expanded_names = prefetchedExpansion.names;
@@ -1074,8 +1074,7 @@
                     } else if (event === "error") {
                         spinner.classList.remove("visible");
                         resultDiv.classList.add("visible");
-                        const s = document.createElement("span"); s.className = "error"; s.textContent = `Error: ${data.message || "Unknown error"}`;
-                        answerMd.innerHTML = ""; answerRaw.textContent = ""; answerRaw.appendChild(s);
+                        answerMd.innerHTML = `<span class="error">${escHtml("Error: " + (data.message || "Unknown error"))}</span>`;
                     } else if (event === "done") {
                         answerMd.innerHTML = renderMarkdown(fullAnswer);
                         answerMd.querySelectorAll("pre code").forEach(el => { hljs.highlightElement(el); });
@@ -1089,8 +1088,8 @@
                     }
                 });
             } catch (err) {
-                const s = document.createElement("span"); s.className = "error"; s.textContent = `Error: ${err.message}`;
-                answerRaw.textContent = ""; answerRaw.appendChild(s); resultDiv.classList.add("visible");
+                answerMd.innerHTML = `<span class="error">${escHtml("Error: " + err.message)}</span>`;
+                resultDiv.classList.add("visible");
             } finally { submitBtn.disabled = false; spinner.classList.remove("visible"); }
         }
 
@@ -1149,7 +1148,6 @@
                     latencyEl.textContent = fmtSec(data.avg_latency_ms);
                     progressEl.textContent = `${total} / ${total}`;
                     statusEl.textContent = "Done";
-                    lastRetrievalSummary = data;
                 },
                 onFinish(s) {
                     retAvgLatency = s.avg_latency_ms;
@@ -1178,7 +1176,11 @@
             passRateEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
 
             let totalPassed = 0, runningLatency = 0, completed = 0, total = 0;
-            const url = e2eModel ? `/api/eval/e2e/stream?model=${encodeURIComponent(e2eModel)}` : "/api/eval/e2e/stream";
+            const e2eEmbModel = document.getElementById("e2e-emb-select").value || "";
+            const params = new URLSearchParams();
+            if (e2eModel) params.set("model", e2eModel);
+            if (e2eEmbModel) params.set("embedding_model", e2eEmbModel);
+            const url = "/api/eval/e2e/stream" + (params.toString() ? `?${params}` : "");
 
             await runEvalStream({
                 btnId: "e2e-btn", statusId: "e2e-status", metricsId: "e2e-metrics", rowsId: "e2e-rows", url,
@@ -1197,7 +1199,6 @@
                     latencyEl.textContent = fmtSec(data.avg_latency_ms);
                     progressEl.textContent = `${total} / ${total}`;
                     statusEl.textContent = `Done — ${data.passed}/${total} passed`;
-                    lastE2ESummary = data;
                 },
                 onFinish(s) {
                     autoSaveTrial({
@@ -1217,18 +1218,66 @@
                 const res = await fetch("/api/embedding-models");
                 const data = await res.json();
                 embeddingModelsData = data.models || [];
-                for (const selId of ["ret-model-select", "ingest-model-select"]) {
-                    const select = document.getElementById(selId);
-                    select.innerHTML = "";
-                    embeddingModelsData.forEach(m => {
+                // Ingest dropdown: only models with API key configured
+                const ingestSelect = document.getElementById("ingest-model-select");
+                ingestSelect.innerHTML = "";
+                const availableModels = embeddingModelsData.filter(m => m.available);
+                if (!availableModels.length) {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "No API keys configured";
+                    opt.disabled = true;
+                    ingestSelect.appendChild(opt);
+                } else {
+                    availableModels.forEach(m => {
                         const opt = document.createElement("option");
                         opt.value = m.name;
                         opt.textContent = `${m.name} (${m.dimensions}d)`;
                         if (m.name === "text-embedding-3-small") opt.selected = true;
-                        select.appendChild(opt);
+                        ingestSelect.appendChild(opt);
                     });
                 }
             } catch (e) { console.error("Failed to load embedding models", e); }
+        }
+
+        // --- Query & retrieval embedding model selectors (ingested collections only) ---
+        function _populateIngestedSelect(selectId, models) {
+            const select = document.getElementById(selectId);
+            select.innerHTML = "";
+            if (!models.length) {
+                const opt = document.createElement("option");
+                opt.value = "";
+                opt.textContent = "No collections ingested";
+                opt.disabled = true;
+                select.appendChild(opt);
+            } else {
+                models.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.name;
+                    opt.textContent = `${m.name} (${m.dimensions}d)`;
+                    if (m.name === "text-embedding-3-small") opt.selected = true;
+                    select.appendChild(opt);
+                });
+            }
+        }
+        async function loadQueryEmbeddingModels() {
+            try {
+                const res = await fetch("/api/collections");
+                const data = await res.json();
+                const models = data.models || [];
+                _populateIngestedSelect("query-emb-select", models);
+                _populateIngestedSelect("ret-model-select", models);
+                _populateIngestedSelect("e2e-emb-select", models);
+            } catch (e) {
+                console.error("Failed to load ingested collections", e);
+                for (const id of ["query-emb-select", "ret-model-select", "e2e-emb-select"]) {
+                    const select = document.getElementById(id);
+                    select.innerHTML = "";
+                    const opt = document.createElement("option");
+                    opt.value = ""; opt.textContent = "Failed to load"; opt.disabled = true;
+                    select.appendChild(opt);
+                }
+            }
         }
 
         // --- Model selector & pricing ---
@@ -1236,14 +1285,27 @@
         function populateModelSelect(selectId, onChange) {
             const select = document.getElementById(selectId);
             select.innerHTML = "";
-            modelsData.forEach(m => {
+            const available = modelsData.filter(m => m.available);
+            if (!available.length) {
                 const opt = document.createElement("option");
-                opt.value = m.name;
-                const label = m.name.replace(/^gpt-/, "GPT-");
-                opt.textContent = label + (m.default ? " (default)" : "");
-                if (m.default) opt.selected = true;
+                opt.value = "";
+                opt.textContent = "No API keys configured";
+                opt.disabled = true;
                 select.appendChild(opt);
-            });
+            } else {
+                available.forEach(m => {
+                    const opt = document.createElement("option");
+                    opt.value = m.name;
+                    const label = m.name.replace(/^gpt-/, "GPT-");
+                    opt.textContent = label + (m.default ? " (default)" : "");
+                    if (m.default) { opt.selected = true; opt.setAttribute("selected", ""); }
+                    select.appendChild(opt);
+                });
+            }
+            if (!select.querySelector("option[selected]")) {
+                const first = select.querySelector("option");
+                if (first) first.selected = true;
+            }
             select.addEventListener("change", () => onChange(select.value));
             onChange(select.value);
         }
@@ -1255,6 +1317,7 @@
                 populateModelSelect("model-select", v => {
                     queryModel = v;
                     const warn = document.getElementById("model-latency-warning");
+                    if (!v) { warn.style.display = "none"; return; }
                     if (_CACHED_MODELS.has(v)) {
                         warn.style.display = "none";
                     } else {
@@ -1307,8 +1370,8 @@
             tbody.innerHTML = "";
             for (const t of trials) {
                 const tr = document.createElement("tr");
-                const embName = t.embedding_model || t.model || "--";
-                const dims = t.embedding_dimensions || "--";
+                const embName = escHtml(String(t.embedding_model || t.model || "--"));
+                const dims = escHtml(String(t.embedding_dimensions || "--"));
                 tr.innerHTML =
                     `<td class="trial-model">${embName}</td>` +
                     `<td>${dims}</td>` +
@@ -1340,7 +1403,7 @@
         async function loadTrials() {
             const tbody = document.getElementById("trials-body");
             if (!modelsData.length) {
-                tbody.innerHTML = '<tr><td colspan="10" style="color:#555">Loading models...</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">Loading models...</td></tr>';
                 return;
             }
             let trials = [];
@@ -1446,6 +1509,7 @@
                     statusEl.textContent = `Done — ${data.chunks_per_sec} chunks/sec`;
                 },
                 onFinish(s) {
+                    loadQueryEmbeddingModels();
                     autoSaveTrial({
                         model: ingestModel,
                         eval_type: "ingestion",
@@ -1483,14 +1547,14 @@
             tbody.innerHTML = "";
             for (const t of trials) {
                 const tr = document.createElement("tr");
-                const embName = t.embedding_model || t.model || "--";
-                const dims = t.embedding_dimensions || "--";
+                const embName = escHtml(String(t.embedding_model || t.model || "--"));
+                const dims = escHtml(String(t.embedding_dimensions || "--"));
                 const timeSec = t.ingestion_time_sec;
                 const chunks = t.chunks_ingested;
                 const files = t.files_processed;
                 const cps = timeSec && chunks ? (chunks / timeSec).toFixed(1) : null;
                 const isBestTime = timeSec != null && timeSec === bestTime;
-                const isBestSpeed = cps != null && parseFloat(cps) === Math.round(bestSpeed * 10) / 10;
+                const isBestSpeed = cps != null && parseFloat(cps) === parseFloat(bestSpeed.toFixed(1));
                 tr.innerHTML =
                     `<td class="trial-model">${embName}</td>` +
                     `<td>${dims}</td>` +
@@ -1506,7 +1570,7 @@
         // Init — models must load before trials so the table can render all models
         async function init() {
             if (retRunCount > 0) updateRetSummary();
-            await Promise.all([loadModels(), loadEmbeddingModels()]);
+            await Promise.all([loadModels(), loadEmbeddingModels(), loadQueryEmbeddingModels()]);
             await Promise.all([loadTrials(), loadRetrievalTrials(), loadIngestionTrials()]);
         }
         init();

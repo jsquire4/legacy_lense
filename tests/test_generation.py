@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tests.conftest import make_async_iter
+from tests.helpers import make_openai_stream_chunk, make_openai_response, make_gemini_response
 
 from app.services.generation import (
     _assemble_context,
@@ -12,7 +13,7 @@ from app.services.generation import (
     _build_messages,
     _extract_citations_from_text,
     _get_generation_client,
-    _strip_markdown,
+    _messages_to_gemini,
     generate_answer,
     generate_answer_stream,
 )
@@ -93,15 +94,6 @@ def test_build_citation_fallback_without_file_path():
     assert result == []
 
 
-def test_strip_markdown():
-    """_strip_markdown removes headers, bold, bullets, numbered lists."""
-    assert _strip_markdown("### Foo") == "Foo"
-    assert _strip_markdown("**bold**") == "bold"
-    assert _strip_markdown("- item") == "item"
-    assert _strip_markdown("1. first") == "first"
-    assert _strip_markdown("  * nested") == "nested"
-
-
 @patch("app.services.generation.get_settings")
 def test_get_generation_client_returns_client(mock_settings):
     """_get_generation_client returns AsyncOpenAI client."""
@@ -150,11 +142,9 @@ async def test_generate_answer_empty_chunks(mock_gen_settings):
 async def test_generate_answer_extracted_citations_skip_fallback(mock_gen_settings):
     """generate_answer skips citation fallback when LLM output has citations."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "See dgesv.f:10-20 for details."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(
+        content="See dgesv.f:10-20 for details.",
+    )
 
     chunks = [{"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
     result = await generate_answer("What?", chunks, None)
@@ -166,14 +156,10 @@ async def test_generate_answer_extracted_citations_skip_fallback(mock_gen_settin
 async def test_generate_answer_with_chunks(mock_gen_settings):
     """generate_answer returns answer from LLM."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "DGESV solves Ax=b using LU."
-    mock_response.usage = MagicMock()
-    mock_response.usage.prompt_tokens = 100
-    mock_response.usage.completion_tokens = 20
-    mock_response.usage.total_tokens = 120
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(
+        content="DGESV solves Ax=b using LU.",
+        usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120},
+    )
 
     chunks = [
         {"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
@@ -188,11 +174,9 @@ async def test_generate_answer_with_chunks(mock_gen_settings):
 async def test_generate_answer_citation_fallback(mock_gen_settings):
     """generate_answer adds citation fallback when LLM omits."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "DGESV solves linear systems."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(
+        content="DGESV solves linear systems.",
+    )
 
     chunks = [
         {"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
@@ -206,11 +190,7 @@ async def test_generate_answer_citation_fallback(mock_gen_settings):
 async def test_generate_answer_uses_default_prompt_when_no_capability(mock_gen_settings):
     """generate_answer uses DEFAULT_SYSTEM_PROMPT when capability is None."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Answer."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(content="Answer.")
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None)
@@ -224,11 +204,7 @@ async def test_generate_answer_uses_default_prompt_when_no_capability(mock_gen_s
 async def test_generate_answer_uses_capability_prompt(mock_gen_settings):
     """generate_answer uses capability-specific prompt when capability given."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Explained."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(content="Explained.")
 
     chunks = [{"text": "code", "metadata": {}}]
     await generate_answer("Explain", chunks, "explain_code")
@@ -254,11 +230,9 @@ async def test_generate_answer_stream_empty_chunks(mock_gen_settings):
 async def test_generate_answer_stream_uses_capability_prompt(mock_gen_settings):
     """generate_answer_stream uses CAPABILITIES prompt when capability in CAPABILITIES."""
     settings, mock_client = mock_gen_settings
-    mock_chunk = MagicMock()
-    mock_chunk.usage = None
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Answer."
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer."),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("Explain this", chunks, "explain_code")]
@@ -272,11 +246,9 @@ async def test_generate_answer_stream_uses_capability_prompt(mock_gen_settings):
 async def test_generate_answer_stream_uses_default_prompt(mock_gen_settings):
     """generate_answer_stream uses DEFAULT_SYSTEM_PROMPT when capability is None."""
     settings, mock_client = mock_gen_settings
-    mock_chunk = MagicMock()
-    mock_chunk.usage = None
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Streamed."
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Streamed."),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -289,25 +261,11 @@ async def test_generate_answer_stream_uses_default_prompt(mock_gen_settings):
 async def test_generate_answer_stream_with_chunks(mock_gen_settings):
     """generate_answer_stream yields token and done events."""
     settings, mock_client = mock_gen_settings
-    mock_chunk1 = MagicMock()
-    mock_chunk1.usage = None
-    mock_chunk1.choices = [MagicMock()]
-    mock_chunk1.choices[0].delta.content = "Hello "
-
-    mock_chunk2 = MagicMock()
-    mock_chunk2.usage = MagicMock()
-    mock_chunk2.usage.prompt_tokens = 50
-    mock_chunk2.usage.completion_tokens = 10
-    mock_chunk2.usage.total_tokens = 60
-    mock_chunk2.choices = [MagicMock()]
-    mock_chunk2.choices[0].delta.content = "world"
-
-    mock_chunk3 = MagicMock()
-    mock_chunk3.usage = None
-    mock_chunk3.choices = [MagicMock()]
-    mock_chunk3.choices[0].delta.content = None
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk1, mock_chunk2, mock_chunk3)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Hello "),
+        make_openai_stream_chunk(content="world", usage={"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}),
+        make_openai_stream_chunk(content=None),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -322,11 +280,9 @@ async def test_generate_answer_stream_with_chunks(mock_gen_settings):
 async def test_generate_answer_stream_citation_fallback(mock_gen_settings):
     """generate_answer_stream adds citation suffix when LLM omits."""
     settings, mock_client = mock_gen_settings
-    mock_chunk = MagicMock()
-    mock_chunk.usage = None
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Answer without citations."
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer without citations."),
+    )
 
     chunks = [
         {"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}},
@@ -341,10 +297,7 @@ async def test_generate_answer_stream_citation_fallback(mock_gen_settings):
 async def test_generate_answer_empty_choices(mock_gen_settings):
     """generate_answer handles response with empty choices."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = []
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(empty_choices=True)
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None)
@@ -356,11 +309,7 @@ async def test_generate_answer_empty_choices(mock_gen_settings):
 async def test_generate_answer_message_content_none(mock_gen_settings):
     """generate_answer handles message.content is None."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = None
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(content_none=True)
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None)
@@ -371,11 +320,9 @@ async def test_generate_answer_message_content_none(mock_gen_settings):
 async def test_generate_answer_citation_fallback_empty_chunks(mock_gen_settings):
     """generate_answer with chunks without file_path yields no citation suffix."""
     settings, mock_client = mock_gen_settings
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Answer without citations."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(
+        content="Answer without citations.",
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None)
@@ -387,19 +334,10 @@ async def test_generate_answer_citation_fallback_empty_chunks(mock_gen_settings)
 async def test_generate_answer_track_ttft_stream_chunk_empty_choices(mock_gen_settings):
     """_generate_with_ttft handles stream chunks with empty choices."""
     settings, mock_client = mock_gen_settings
-    mock_chunk1 = MagicMock()
-    mock_chunk1.usage = None
-    mock_chunk1.choices = []
-
-    mock_chunk2 = MagicMock()
-    mock_chunk2.usage = MagicMock()
-    mock_chunk2.usage.prompt_tokens = 50
-    mock_chunk2.usage.completion_tokens = 10
-    mock_chunk2.usage.total_tokens = 60
-    mock_chunk2.choices = [MagicMock()]
-    mock_chunk2.choices[0].delta.content = "Answer"
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk1, mock_chunk2)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(empty_choices=True),
+        make_openai_stream_chunk(content="Answer", usage={"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None, track_ttft=True)
@@ -410,20 +348,10 @@ async def test_generate_answer_track_ttft_stream_chunk_empty_choices(mock_gen_se
 async def test_generate_answer_track_ttft_stream_chunk_no_content(mock_gen_settings):
     """_generate_with_ttft handles stream chunks with choices but delta.content None."""
     settings, mock_client = mock_gen_settings
-    mock_chunk1 = MagicMock()
-    mock_chunk1.usage = None
-    mock_chunk1.choices = [MagicMock()]
-    mock_chunk1.choices[0].delta.content = None
-
-    mock_chunk2 = MagicMock()
-    mock_chunk2.usage = MagicMock()
-    mock_chunk2.usage.prompt_tokens = 50
-    mock_chunk2.usage.completion_tokens = 10
-    mock_chunk2.usage.total_tokens = 60
-    mock_chunk2.choices = [MagicMock()]
-    mock_chunk2.choices[0].delta.content = "Answer"
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk1, mock_chunk2)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content=None),
+        make_openai_stream_chunk(content="Answer", usage={"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None, track_ttft=True)
@@ -435,20 +363,10 @@ async def test_generate_answer_track_ttft_stream_chunk_no_content(mock_gen_setti
 async def test_generate_answer_track_ttft(mock_gen_settings):
     """generate_answer with track_ttft=True returns ttft_ms and uses streaming."""
     settings, mock_client = mock_gen_settings
-    mock_chunk1 = MagicMock()
-    mock_chunk1.usage = None
-    mock_chunk1.choices = [MagicMock()]
-    mock_chunk1.choices[0].delta.content = "Answer"
-
-    mock_chunk2 = MagicMock()
-    mock_chunk2.usage = MagicMock()
-    mock_chunk2.usage.prompt_tokens = 50
-    mock_chunk2.usage.completion_tokens = 10
-    mock_chunk2.usage.total_tokens = 60
-    mock_chunk2.choices = [MagicMock()]
-    mock_chunk2.choices[0].delta.content = " text"
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk1, mock_chunk2)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer"),
+        make_openai_stream_chunk(content=" text", usage={"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     result = await generate_answer("What?", chunks, None, track_ttft=True)
@@ -461,25 +379,11 @@ async def test_generate_answer_track_ttft(mock_gen_settings):
 async def test_generate_answer_stream_delta_content_empty(mock_gen_settings):
     """generate_answer_stream skips yield when delta.content is empty."""
     settings, mock_client = mock_gen_settings
-    mock_chunk1 = MagicMock()
-    mock_chunk1.usage = None
-    mock_chunk1.choices = [MagicMock()]
-    mock_chunk1.choices[0].delta.content = "Hi"
-
-    mock_chunk2 = MagicMock()
-    mock_chunk2.usage = None
-    mock_chunk2.choices = [MagicMock()]
-    mock_chunk2.choices[0].delta.content = ""  # empty string
-
-    mock_chunk3 = MagicMock()
-    mock_chunk3.usage = MagicMock()
-    mock_chunk3.usage.prompt_tokens = 10
-    mock_chunk3.usage.completion_tokens = 5
-    mock_chunk3.usage.total_tokens = 15
-    mock_chunk3.choices = [MagicMock()]
-    mock_chunk3.choices[0].delta.content = "!"
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk1, mock_chunk2, mock_chunk3)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Hi"),
+        make_openai_stream_chunk(content=""),  # empty string
+        make_openai_stream_chunk(content="!", usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -492,19 +396,10 @@ async def test_generate_answer_stream_delta_content_empty(mock_gen_settings):
 async def test_generate_answer_stream_chunk_no_choices(mock_gen_settings):
     """generate_answer_stream handles stream chunks with empty choices."""
     settings, mock_client = mock_gen_settings
-    mock_chunk_empty = MagicMock()
-    mock_chunk_empty.usage = None
-    mock_chunk_empty.choices = []
-
-    mock_chunk_content = MagicMock()
-    mock_chunk_content.usage = MagicMock()
-    mock_chunk_content.usage.prompt_tokens = 10
-    mock_chunk_content.usage.completion_tokens = 5
-    mock_chunk_content.usage.total_tokens = 15
-    mock_chunk_content.choices = [MagicMock()]
-    mock_chunk_content.choices[0].delta.content = "Done"
-
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk_empty, mock_chunk_content)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(empty_choices=True),
+        make_openai_stream_chunk(content="Done", usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -515,11 +410,9 @@ async def test_generate_answer_stream_chunk_no_choices(mock_gen_settings):
 async def test_generate_answer_stream_citation_fallback_no_file_path(mock_gen_settings):
     """generate_answer_stream with chunks without file_path yields no citation suffix."""
     settings, mock_client = mock_gen_settings
-    mock_chunk = MagicMock()
-    mock_chunk.usage = None
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Answer."
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer."),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -532,12 +425,7 @@ async def test_generate_answer_reasoning_model_uses_reasoning_effort(mock_gen_se
     """generate_answer passes reasoning_effort instead of temperature for gpt-5 models."""
     settings, mock_client = mock_gen_settings
     settings.CHAT_MODEL = "gpt-5-nano"
-
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = "Answer."
-    mock_response.usage = None
-    mock_client.chat.completions.create.return_value = mock_response
+    mock_client.chat.completions.create.return_value = make_openai_response(content="Answer.")
 
     chunks = [{"text": "code", "metadata": {}}]
     await generate_answer("What?", chunks, None)
@@ -551,15 +439,9 @@ async def test_generate_answer_track_ttft_reasoning_model(mock_gen_settings):
     """_generate_with_ttft passes reasoning_effort for gpt-5 models."""
     settings, mock_client = mock_gen_settings
     settings.CHAT_MODEL = "gpt-5-mini"
-
-    mock_chunk = MagicMock()
-    mock_chunk.usage = MagicMock()
-    mock_chunk.usage.prompt_tokens = 50
-    mock_chunk.usage.completion_tokens = 10
-    mock_chunk.usage.total_tokens = 60
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Answer"
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer", usage={"prompt_tokens": 50, "completion_tokens": 10, "total_tokens": 60}),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     await generate_answer("What?", chunks, None, track_ttft=True)
@@ -573,12 +455,9 @@ async def test_generate_answer_stream_reasoning_model(mock_gen_settings):
     """generate_answer_stream passes reasoning_effort for gpt-5 models."""
     settings, mock_client = mock_gen_settings
     settings.CHAT_MODEL = "gpt-5.2"
-
-    mock_chunk = MagicMock()
-    mock_chunk.usage = None
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Answer."
-    mock_client.chat.completions.create.return_value = make_async_iter(mock_chunk)
+    mock_client.chat.completions.create.return_value = make_async_iter(
+        make_openai_stream_chunk(content="Answer."),
+    )
 
     chunks = [{"text": "code", "metadata": {}}]
     events = [e async for e in generate_answer_stream("What?", chunks, None)]
@@ -586,3 +465,211 @@ async def test_generate_answer_stream_reasoning_model(mock_gen_settings):
     call_kwargs = mock_client.chat.completions.create.call_args.kwargs
     assert call_kwargs["reasoning_effort"] == "low"
     assert "temperature" not in call_kwargs
+
+
+# --- Gemini generation tests ---
+
+def test_messages_to_gemini_extracts_system():
+    """_messages_to_gemini separates system message from content."""
+    messages = [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    system, contents = _messages_to_gemini(messages)
+    assert system == "You are helpful."
+    assert len(contents) == 1
+    assert contents[0].role == "user"
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_gemini_dispatch(mock_gemini_gen_settings):
+    """generate_answer dispatches to Gemini for gemini-* models."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_gemini_response(
+        text="Gemini answer about dgesv.f:10-20.",
+        usage_metadata={"prompt_token_count": 100, "candidates_token_count": 20, "total_token_count": 120},
+    ))
+
+    chunks = [{"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
+    result = await generate_answer("What is DGESV?", chunks, None, model="gemini-2.0-flash")
+
+    assert "Gemini answer" in result["answer"]
+    assert result["model"] == "gemini-2.0-flash"
+    assert result["token_usage"]["prompt_tokens"] == 100
+    mock_client.aio.models.generate_content.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_gemini_empty_chunks(mock_gemini_gen_settings):
+    """generate_answer returns fallback for Gemini when chunks empty."""
+    result = await generate_answer("What?", [], None, model="gemini-2.0-flash")
+    assert "don't have sufficient context" in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_gemini_citation_fallback(mock_gemini_gen_settings):
+    """generate_answer adds citation fallback for Gemini when LLM omits citations."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    mock_client.aio.models.generate_content = AsyncMock(return_value=make_gemini_response(
+        text="DGESV solves linear systems.",
+    ))
+
+    chunks = [{"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
+    result = await generate_answer("What?", chunks, None, model="gemini-2.0-flash")
+    assert "Sources:" in result["answer"]
+    assert "dgesv.f:1-50" in result["citations"]
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_stream_gemini(mock_gemini_gen_settings):
+    """generate_answer_stream works with Gemini models."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    usage = MagicMock()
+    usage.prompt_token_count = 50
+    usage.candidates_token_count = 10
+    usage.total_token_count = 60
+
+    async def fake_async_iter():
+        yield MagicMock(text="Hello ", usage_metadata=None)
+        yield MagicMock(text="world", usage_metadata=usage)
+
+    mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_async_iter())
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    token_events = [e for e in events if e["type"] == "token"]
+    assert any("Hello" in e["token"] for e in token_events)
+    assert any("world" in e["token"] for e in token_events)
+    assert events[-1]["type"] == "done"
+    assert events[-1]["token_usage"]["total_tokens"] == 60
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_gemini_track_ttft(mock_gemini_gen_settings):
+    """generate_answer with track_ttft=True works for Gemini models."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    usage = MagicMock()
+    usage.prompt_token_count = 50
+    usage.candidates_token_count = 10
+    usage.total_token_count = 60
+
+    async def fake_async_iter():
+        yield MagicMock(text="Answer", usage_metadata=usage)
+
+    mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_async_iter())
+
+    chunks = [{"text": "code", "metadata": {}}]
+    result = await generate_answer("What?", chunks, None, track_ttft=True, model="gemini-2.0-flash")
+    assert "Answer" in result["answer"]
+    assert "ttft_ms" in result
+    assert isinstance(result["ttft_ms"], (int, float))
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_stream_gemini_error(mock_gemini_gen_settings):
+    """generate_answer_stream yields error event when Gemini stream raises."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    async def failing_stream():
+        raise RuntimeError("Gemini API unavailable")
+        yield  # noqa: F841 — unreachable yield makes this an async generator
+
+    mock_client.aio.models.generate_content_stream = AsyncMock(return_value=failing_stream())
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    error_events = [e for e in events if e["type"] == "error"]
+    assert len(error_events) == 1
+    assert "Gemini API unavailable" in error_events[0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_stream_gemini_citation_fallback(mock_gemini_gen_settings):
+    """generate_answer_stream adds citation suffix for Gemini when LLM omits."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    async def fake_stream():
+        yield MagicMock(text="Answer without citations.", usage_metadata=None)
+
+    mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+
+    chunks = [{"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    token_events = [e for e in events if e["type"] == "token"]
+    assert any("Sources:" in e["token"] for e in token_events)
+    assert events[-1]["type"] == "done"
+    assert "dgesv.f:1-50" in events[-1]["citations"]
+
+
+# --- Audit issue #6: Gemini safety block in streaming ---
+
+@pytest.mark.asyncio
+async def test_gemini_generate_stream_safety_block(mock_gemini_gen_settings):
+    """_gemini_generate_stream handles ValueError from chunk.text (safety block)."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    chunk_blocked = MagicMock()
+    type(chunk_blocked).text = property(lambda self: (_ for _ in ()).throw(ValueError("safety block")))
+    chunk_blocked.usage_metadata = None
+
+    chunk_ok = MagicMock()
+    chunk_ok.text = "OK"
+    chunk_ok.usage_metadata = None
+
+    async def fake_stream():
+        yield chunk_blocked
+        yield chunk_ok
+
+    mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    token_events = [e for e in events if e["type"] == "token"]
+    # The blocked chunk should produce empty text (skipped), OK chunk should appear
+    assert any("OK" in e["token"] for e in token_events)
+    assert events[-1]["type"] == "done"
+
+
+# --- Audit issue #18: Gemini non-stream error propagation ---
+
+@pytest.mark.asyncio
+async def test_gemini_generate_nonstream_error(mock_gemini_gen_settings):
+    """generate_answer propagates exception when Gemini non-streaming call raises."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    mock_client.aio.models.generate_content = AsyncMock(
+        side_effect=RuntimeError("Gemini API down")
+    )
+
+    chunks = [{"text": "code", "metadata": {}}]
+    with pytest.raises(RuntimeError, match="Gemini API down"):
+        await generate_answer("What?", chunks, None, model="gemini-2.0-flash")
+
+
+# --- Audit issue #22: messages_to_gemini edge cases ---
+
+def test_messages_to_gemini_no_system():
+    """_messages_to_gemini returns None system_instruction for user-only messages."""
+    messages = [
+        {"role": "user", "content": "Hello"},
+    ]
+    system, contents = _messages_to_gemini(messages)
+    assert system is None
+    assert len(contents) == 1
+
+
+def test_messages_to_gemini_assistant_role():
+    """_messages_to_gemini maps assistant role to 'model'."""
+    messages = [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Hi there"},
+    ]
+    system, contents = _messages_to_gemini(messages)
+    assert system == "You are helpful."
+    assert len(contents) == 2
+    assert contents[1].role == "model"

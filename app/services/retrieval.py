@@ -7,7 +7,7 @@ import re
 from app.services.embeddings import embed_query, get_async_openai_client
 from app.services.vector_store import async_search, async_search_by_name, async_search_by_caller
 from app.config import get_settings
-from app.models_data import is_reasoning_model, uses_legacy_max_tokens
+from app.models_data import get_provider
 
 logger = logging.getLogger(__name__)
 
@@ -56,24 +56,33 @@ def _extract_routine_name(query: str) -> str | None:
 async def _expand_query(query: str, model: str | None = None) -> list[str]:
     """Use the LLM to identify relevant LAPACK routine names for a conceptual query."""
     try:
-        client = get_async_openai_client()
         settings = get_settings()
         resolved_model = model or settings.CHAT_MODEL
-        token_key = "max_tokens" if uses_legacy_max_tokens(resolved_model) else "max_completion_tokens"
-        kwargs = dict(
-            model=resolved_model,
-            messages=[
-                {"role": "system", "content": _EXPAND_PROMPT},
-                {"role": "user", "content": query},
-            ],
-        )
-        kwargs[token_key] = 50
-        if is_reasoning_model(resolved_model):
-            kwargs["reasoning_effort"] = "low"
+        provider = get_provider(resolved_model)
+
+        messages = [
+            {"role": "system", "content": _EXPAND_PROMPT},
+            {"role": "user", "content": query},
+        ]
+
+        if provider == "gemini":
+            from app.services.gemini_helpers import get_gemini_client, messages_to_gemini, build_gemini_config
+            client = get_gemini_client()
+            system_instruction, contents = messages_to_gemini(messages)
+            config = build_gemini_config(system_instruction, max_completion_tokens=50, temperature=0)
+            response = await client.aio.models.generate_content(
+                model=resolved_model, contents=contents, config=config,
+            )
+            text = (response.text or "").strip()
         else:
-            kwargs["temperature"] = 0
-        response = await client.chat.completions.create(**kwargs)
-        text = response.choices[0].message.content.strip()
+            from app.services.generation import _build_llm_kwargs
+            client = get_async_openai_client()
+            kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens=50)
+            if "temperature" in kwargs:
+                kwargs["temperature"] = 0  # deterministic expansion
+            response = await client.chat.completions.create(**kwargs)
+            text = (response.choices[0].message.content or "").strip()
+
         # Only keep tokens that look like LAPACK/BLAS names (start with S/D/C/Z/I prefix)
         all_tokens = re.findall(r'[A-Z][A-Z0-9]{3,}', text.upper())
         names = [n for n in all_tokens if n[0] in "SDCZI" and len(n) >= 4]

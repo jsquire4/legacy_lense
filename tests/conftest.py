@@ -153,6 +153,26 @@ def mock_gen_settings():
         yield settings, mock_client
 
 
+@pytest.fixture
+def mock_gemini_gen_settings():
+    """Patch get_settings and _get_gemini_client for Gemini generation tests.
+
+    Yields (settings, mock_client) so tests can configure responses.
+    The client's async methods are pre-configured as AsyncMock to prevent
+    TypeError when tests iterate with ``async for``.
+    """
+    with patch("app.services.generation.get_settings") as ms, \
+         patch("app.services.generation._get_gemini_client") as mc:
+        settings = MagicMock()
+        settings.CHAT_MODEL = "gemini-2.0-flash"
+        ms.return_value = settings
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock()
+        mock_client.aio.models.generate_content_stream = AsyncMock()
+        mc.return_value = mock_client
+        yield settings, mock_client
+
+
 def make_async_iter(*chunks):
     """Create an async iterator from mock stream chunks."""
     async def _iter():
@@ -176,31 +196,3 @@ def retrieval_mocks():
         yield me, msn, ms
 
 
-# --- API test helpers ---
-
-def make_retrieve_result(
-    chunks=None, strategy="vector", expanded_names=None,
-):
-    """Build a standard retrieve() return value for API tests."""
-    if chunks is None:
-        chunks = [
-            {"id": "abc123", "text": "test", "score": 0.9,
-             "metadata": {"file_path": "test.f"}, "_match_type": "vector"}
-        ]
-    return {
-        "chunks": chunks,
-        "expanded_names": expanded_names or [],
-        "retrieval_strategy": strategy,
-    }
-
-
-def make_generate_result(
-    answer="Test answer", citations=None, model="gpt-4o-mini", token_usage=None,
-):
-    """Build a standard generate_answer() return value for API tests."""
-    return {
-        "answer": answer,
-        "citations": citations or [],
-        "model": model,
-        "token_usage": token_usage or {},
-    }

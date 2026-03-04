@@ -1,7 +1,5 @@
 """Tests for eval_data module."""
 
-import pytest
-
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES, compute_recall_at_k, check_e2e_result
 
 

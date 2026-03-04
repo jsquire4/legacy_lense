@@ -4,8 +4,6 @@ import json
 import logging
 from unittest.mock import patch, MagicMock
 
-import pytest
-
 from app.logging_config import JSONFormatter, setup_logging
 
 

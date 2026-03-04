@@ -1,6 +1,5 @@
 """Tests for the chunker service."""
 
-import pytest
 from app.services.parser import ParsedUnit
 from app.services.chunker import chunk_units, _count_tokens
 
@@ -176,7 +175,7 @@ def test_sliding_window_empty_source():
 
 def test_sliding_window_single_chunk_breaks_loop():
     """_sliding_window_split breaks when end >= len(tokens) (branch coverage)."""
-    from app.services.chunker import _sliding_window_split, _count_tokens
+    from app.services.chunker import _sliding_window_split
 
     short = "Hello world"
     result = _sliding_window_split(short, max_tokens=100)
@@ -210,7 +209,6 @@ def test_safety_truncation_when_chunk_exceeds_limit():
     """Chunk text exceeding max_tokens gets truncated."""
     from app.services.chunker import _count_tokens
 
-    header = "ROUTINE: X (subroutine)\nFILE: test.f\n\nSOURCE:\n"
     long_line = "      " + "CALL FOO(BAR,BAZ)\n" * 80
     unit = _make_unit(source_text=long_line)
     chunks = chunk_units([unit], max_tokens=120)

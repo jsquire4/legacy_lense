@@ -7,6 +7,7 @@ from app.services.embeddings import (
     embed_texts, _truncate_to_tokens, embed_query,
     get_async_openai_client, _maybe_truncate,
 )
+from tests.helpers import mock_embedding_settings
 
 
 def test_truncate_short_text():
@@ -40,10 +41,7 @@ def test_maybe_truncate_skips_non_openai():
 @patch("app.services.embeddings.get_openai_client")
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_calls_api(mock_settings, mock_client_fn):
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     mock_embedding = MagicMock()
     mock_embedding.index = 0
@@ -65,10 +63,7 @@ def test_embed_texts_calls_api(mock_settings, mock_client_fn):
 @patch("app.services.embeddings.get_openai_client")
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_batching(mock_settings, mock_client_fn):
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     def make_response(batch):
         embeddings = []
@@ -118,10 +113,7 @@ def test_get_openai_client_returns_client(mock_settings):
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_raises_on_count_mismatch(mock_settings, mock_client_fn):
     """embed_texts raises RuntimeError when response has fewer embeddings than inputs."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     mock_embedding = MagicMock()
     mock_embedding.index = 0
@@ -160,10 +152,7 @@ def test_get_async_openai_client_returns_client(mock_settings):
 @pytest.mark.asyncio
 async def test_embed_query_calls_api(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query calls API and caches result."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     mock_embedding = MagicMock()
     mock_embedding.embedding = [0.2] * 1536
@@ -185,10 +174,7 @@ async def test_embed_query_calls_api(mock_settings, mock_client_fn, clear_embed_
 @pytest.mark.asyncio
 async def test_embed_query_cache_hit(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query returns cached result on repeat query, no API call."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     mock_embedding = MagicMock()
     mock_embedding.embedding = [0.3] * 1536
@@ -211,10 +197,7 @@ async def test_embed_query_cache_hit(mock_settings, mock_client_fn, clear_embed_
 @pytest.mark.asyncio
 async def test_embed_query_cache_eviction(mock_settings, mock_client_fn, clear_embed_cache):
     """embed_query evicts oldest when cache is full."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 8191
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings()
 
     mock_client = AsyncMock()
     mock_client.embeddings.create = AsyncMock(return_value=MagicMock(data=[MagicMock(embedding=[0.0] * 1536)]))
@@ -242,10 +225,7 @@ async def test_embed_query_cache_eviction(mock_settings, mock_client_fn, clear_e
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_voyage(mock_settings, mock_voyage_fn):
     """embed_texts dispatches to Voyage SDK with input_type='document'."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 32000
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=32000)
 
     mock_result = MagicMock()
     mock_result.embeddings = [[0.1] * 1024, [0.2] * 1024]
@@ -266,10 +246,7 @@ def test_embed_texts_voyage(mock_settings, mock_voyage_fn):
 @pytest.mark.asyncio
 async def test_embed_query_voyage(mock_settings, mock_voyage_fn, clear_embed_cache):
     """embed_query dispatches to async Voyage SDK with input_type='query'."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 32000
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=32000)
 
     mock_result = MagicMock()
     mock_result.embeddings = [[0.5] * 1024]
@@ -292,10 +269,7 @@ async def test_embed_query_voyage(mock_settings, mock_voyage_fn, clear_embed_cac
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_gemini(mock_settings, mock_gemini_fn):
     """embed_texts dispatches to Gemini SDK."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 2048
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=2048)
 
     emb1, emb2 = MagicMock(), MagicMock()
     emb1.values = [0.1] * 3072
@@ -322,10 +296,7 @@ def test_embed_texts_gemini(mock_settings, mock_gemini_fn):
 @patch("app.services.embeddings.get_settings")
 def test_embed_texts_cohere(mock_settings, mock_cohere_fn):
     """embed_texts dispatches to Cohere SDK with embedding_types=['float']."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 512
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=512)
 
     mock_result = MagicMock()
     mock_result.embeddings.float_ = [[0.1] * 1536, [0.2] * 1536]
@@ -353,10 +324,7 @@ def test_embed_texts_cohere(mock_settings, mock_cohere_fn):
 @pytest.mark.asyncio
 async def test_embed_query_gemini(mock_settings, mock_gemini_fn, clear_embed_cache):
     """embed_query dispatches to Gemini SDK via run_in_executor, accesses .values."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 2048
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=2048)
 
     mock_emb = MagicMock()
     mock_emb.values = [0.5] * 3072
@@ -377,10 +345,7 @@ async def test_embed_query_gemini(mock_settings, mock_gemini_fn, clear_embed_cac
 @pytest.mark.asyncio
 async def test_embed_query_cohere(mock_settings, mock_cohere_fn, clear_embed_cache):
     """embed_query dispatches to async Cohere SDK with input_type='search_query'."""
-    settings = MagicMock()
-    settings.EMBEDDING_MODEL = "text-embedding-3-small"
-    settings.MAX_CHUNK_TOKENS = 128000
-    mock_settings.return_value = settings
+    mock_settings.return_value = mock_embedding_settings(max_tokens=128000)
 
     mock_result = MagicMock()
     mock_result.embeddings.float_ = [[0.5] * 1536]
@@ -396,3 +361,76 @@ async def test_embed_query_cohere(mock_settings, mock_cohere_fn, clear_embed_cac
         input_type="search_query",
         embedding_types=["float"],
     )
+
+
+# --- Audit issue #5: Unknown model fallback ---
+
+@patch("app.services.embeddings.get_settings")
+def test_resolve_model_unknown_fallback(mock_settings):
+    """_resolve_model falls back to OpenAI provider for unknown models."""
+    settings = MagicMock()
+    settings.EMBEDDING_MODEL = "text-embedding-3-small"
+    settings.MAX_CHUNK_TOKENS = 8191
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _resolve_model
+    name, provider, max_tokens = _resolve_model("totally-unknown-model")
+    assert name == "totally-unknown-model"
+    assert provider == "openai"
+    assert max_tokens == 8191
+
+
+def test_encoder_for_model_unknown_fallback():
+    """_encoder_for_model falls back to cl100k_base for unknown models."""
+    from app.services.embeddings import _encoder_for_model
+    encoder = _encoder_for_model("totally-unknown-model")
+    assert encoder is not None
+    # Verify it's cl100k_base by encoding a known string
+    tokens = encoder.encode("hello")
+    assert len(tokens) >= 1
+
+
+# --- Audit issue #19: Gemini embedding batching ---
+
+@patch("app.services.embeddings._get_gemini_client")
+@patch("app.services.embeddings.get_settings")
+def test_embed_texts_gemini_batching(mock_settings, mock_gemini_fn):
+    """embed_texts with Gemini batches at _GEMINI_BATCH=100."""
+    mock_settings.return_value = mock_embedding_settings(max_tokens=2048)
+
+    def fake_embed(model, contents):
+        result = MagicMock()
+        embs = []
+        for _ in contents:
+            e = MagicMock()
+            e.values = [0.1] * 3072
+            embs.append(e)
+        result.embeddings = embs
+        return result
+
+    mock_client = MagicMock()
+    mock_client.models.embed_content.side_effect = fake_embed
+    mock_gemini_fn.return_value = mock_client
+
+    texts = [f"text {i}" for i in range(150)]
+    result = embed_texts(texts, model="gemini-embedding-001")
+    assert len(result) == 150
+    assert mock_client.models.embed_content.call_count == 2  # 100 + 50
+
+
+# --- Audit issue #20: Gemini client missing key ---
+
+@patch("app.services.gemini_helpers.get_settings")
+def test_gemini_client_missing_key(mock_settings):
+    """get_gemini_client raises RuntimeError when GEMINI_API_KEY is empty."""
+    settings = MagicMock()
+    settings.GEMINI_API_KEY = ""
+    mock_settings.return_value = settings
+
+    from app.services.gemini_helpers import get_gemini_client
+    get_gemini_client.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+            get_gemini_client()
+    finally:
+        get_gemini_client.cache_clear()

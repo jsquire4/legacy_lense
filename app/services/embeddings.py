@@ -31,7 +31,7 @@ def _encoder_for_model(model_name: str | None = None):
                 return None
             return _get_encoder(info.tokenizer)
         except KeyError:
-            pass
+            logger.warning("Unknown embedding model '%s' in _encoder_for_model, using cl100k_base", model_name)
     return _get_encoder("cl100k_base")
 
 
@@ -85,13 +85,9 @@ def _get_async_voyage_client():
     return voyageai.AsyncClient(api_key=settings.VOYAGE_API_KEY)
 
 
-@lru_cache
 def _get_gemini_client():
-    from google import genai
-    settings = get_settings()
-    if not settings.GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY is required to use Gemini embeddings")
-    return genai.Client(api_key=settings.GEMINI_API_KEY)
+    from app.services.gemini_helpers import get_gemini_client
+    return get_gemini_client()
 
 
 @lru_cache
@@ -122,57 +118,44 @@ _GEMINI_BATCH = 100
 _COHERE_BATCH = 96
 
 
-def _openai_embed_batch(texts: list[str], model: str) -> list[list[float]]:
-    client = get_openai_client()
+def _batched_embed(texts, model, batch_size, client_factory, embed_call):
+    """Generic batched embedding loop."""
+    client = client_factory()
     all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _OPENAI_BATCH):
-        batch = texts[i:i + _OPENAI_BATCH]
-        response = client.embeddings.create(model=model, input=batch)
-        sorted_data = sorted(response.data, key=lambda x: x.index)
-        all_embeddings.extend([d.embedding for d in sorted_data])
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i:i + batch_size]
+        all_embeddings.extend(embed_call(client, batch, model))
     return all_embeddings
 
 
-def _voyage_embed_batch(texts: list[str], model: str) -> list[list[float]]:
-    client = _get_voyage_client()
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _VOYAGE_BATCH):
-        batch = texts[i:i + _VOYAGE_BATCH]
-        result = client.embed(batch, model=model, input_type="document")
-        all_embeddings.extend(result.embeddings)
-    return all_embeddings
+def _openai_embed_call(client, batch, model):
+    response = client.embeddings.create(model=model, input=batch)
+    return [d.embedding for d in sorted(response.data, key=lambda x: x.index)]
 
 
-def _gemini_embed_batch(texts: list[str], model: str) -> list[list[float]]:
-    client = _get_gemini_client()
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _GEMINI_BATCH):
-        batch = texts[i:i + _GEMINI_BATCH]
-        result = client.models.embed_content(model=model, contents=batch)
-        all_embeddings.extend([e.values for e in result.embeddings])
-    return all_embeddings
+def _voyage_embed_call(client, batch, model):
+    result = client.embed(batch, model=model, input_type="document")
+    return result.embeddings
 
 
-def _cohere_embed_batch(texts: list[str], model: str) -> list[list[float]]:
-    client = _get_cohere_client()
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _COHERE_BATCH):
-        batch = texts[i:i + _COHERE_BATCH]
-        result = client.embed(
-            texts=batch,
-            model=model,
-            input_type="search_document",
-            embedding_types=["float"],
-        )
-        all_embeddings.extend(result.embeddings.float_)
-    return all_embeddings
+def _gemini_embed_call(client, batch, model):
+    result = client.models.embed_content(model=model, contents=batch)
+    return [e.values for e in result.embeddings]
+
+
+def _cohere_embed_call(client, batch, model):
+    result = client.embed(
+        texts=batch, model=model,
+        input_type="search_document", embedding_types=["float"],
+    )
+    return result.embeddings.float_
 
 
 _SYNC_DISPATCH = {
-    "openai": _openai_embed_batch,
-    "voyage": _voyage_embed_batch,
-    "gemini": _gemini_embed_batch,
-    "cohere": _cohere_embed_batch,
+    "openai": lambda texts, model: _batched_embed(texts, model, _OPENAI_BATCH, get_openai_client, _openai_embed_call),
+    "voyage": lambda texts, model: _batched_embed(texts, model, _VOYAGE_BATCH, _get_voyage_client, _voyage_embed_call),
+    "gemini": lambda texts, model: _batched_embed(texts, model, _GEMINI_BATCH, _get_gemini_client, _gemini_embed_call),
+    "cohere": lambda texts, model: _batched_embed(texts, model, _COHERE_BATCH, _get_cohere_client, _cohere_embed_call),
 }
 
 
@@ -228,30 +211,29 @@ _embed_cache: dict[tuple[str, str], list[float]] = {}
 _EMBED_CACHE_MAX = 128
 
 
-def _resolve_model(model: str | None) -> tuple[str, str]:
-    """Return (resolved_model_name, provider). Defaults to settings."""
+def _resolve_model(model: str | None) -> tuple[str, str, int]:
+    """Return (resolved_model_name, provider, max_tokens). Defaults to settings."""
     from app.embedding_registry import get_model_info
     settings = get_settings()
     resolved = model or settings.EMBEDDING_MODEL
     try:
         info = get_model_info(resolved)
-        return resolved, info.provider
+        return resolved, info.provider, info.max_tokens
     except KeyError:
         logger.warning("Unknown embedding model '%s', falling back to OpenAI provider", resolved)
-        return resolved, "openai"
+        return resolved, "openai", settings.MAX_CHUNK_TOKENS
 
 
 async def embed_query(text: str, model: str | None = None) -> list[float]:
     """Embed a single query string with in-memory cache."""
-    resolved_model, provider = _resolve_model(model)
+    resolved_model, provider, max_tokens = _resolve_model(model)
     cache_key = (resolved_model, text)
 
     if cache_key in _embed_cache:
         return _embed_cache[cache_key]
 
     encoder = _encoder_for_model(resolved_model)
-    settings = get_settings()
-    truncated = _truncate_to_tokens(text, settings.MAX_CHUNK_TOKENS, encoder)
+    truncated = _truncate_to_tokens(text, max_tokens, encoder)
 
     embed_fn = _ASYNC_DISPATCH[provider]
     embedding = await embed_fn(truncated, resolved_model)
@@ -266,11 +248,10 @@ async def embed_query(text: str, model: str | None = None) -> list[float]:
 
 def embed_texts(texts: list[str], model: str | None = None) -> list[list[float]]:
     """Embed a list of texts. Handles batching, truncation, and provider dispatch."""
-    resolved_model, provider = _resolve_model(model)
-    settings = get_settings()
+    resolved_model, provider, max_tokens = _resolve_model(model)
     encoder = _encoder_for_model(resolved_model)
 
-    truncated = _maybe_truncate(texts, settings.MAX_CHUNK_TOKENS, encoder)
+    truncated = _maybe_truncate(texts, max_tokens, encoder)
 
     embed_fn = _SYNC_DISPATCH[provider]
     all_embeddings = embed_fn(truncated, resolved_model)

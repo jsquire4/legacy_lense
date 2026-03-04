@@ -1,13 +1,37 @@
 """Pydantic request/response models for the LegacyLens API."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
-class QueryRequest(BaseModel):
+def _validate_embedding_model(v: str | None) -> str | None:
+    if v is None:
+        return v
+    from app.embedding_registry import EMBEDDING_MODELS
+    if v not in EMBEDDING_MODELS:
+        raise ValueError(f"Unknown embedding model: '{v}'")
+    return v
+
+
+class _QueryBase(BaseModel):
+    """Shared fields for query and capability requests."""
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(default=8, ge=1, le=20)
     model: str | None = None
+    embedding_model: str | None = None
     expanded_names: list[str] | None = None
+
+    @field_validator("embedding_model")
+    @classmethod
+    def check_embedding_model(cls, v):
+        return _validate_embedding_model(v)
+
+
+class QueryRequest(_QueryBase):
+    pass
+
+
+class CapabilityRequest(_QueryBase):
+    pass
 
 
 class ChunkDetail(BaseModel):
@@ -46,13 +70,6 @@ class QueryResponse(BaseModel):
     timing: TimingDetail | None = None
 
 
-class CapabilityRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=2000)
-    top_k: int = Field(default=8, ge=1, le=20)
-    model: str | None = None
-    expanded_names: list[str] | None = None
-
-
 class ExpandRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     model: str | None = None
@@ -78,3 +95,8 @@ class TrialRequest(BaseModel):
     chunks_ingested: int | None = None
     files_processed: int | None = None
     notes: str = ""
+
+    @field_validator("embedding_model")
+    @classmethod
+    def check_embedding_model(cls, v):
+        return _validate_embedding_model(v)

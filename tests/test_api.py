@@ -6,9 +6,19 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.eval_data import EVAL_QUERIES, E2E_EVAL_QUERIES
-from tests.conftest import make_retrieve_result, make_generate_result
+from tests.helpers import make_retrieve_result, make_generate_result
+from tests.helpers import parse_sse_events
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _clear_response_cache():
+    """Clear the response cache before and after every test to prevent leaks."""
+    import app.main as main_mod
+    main_mod._RESPONSE_CACHE.clear()
+    yield
+    main_mod._RESPONSE_CACHE.clear()
 
 
 def test_health():
@@ -66,20 +76,14 @@ def test_query_endpoint_cache_ttl_expiry(mock_retrieve, mock_generate):
     )
     mock_generate.return_value = make_generate_result()
 
-    import app.main as main_mod
+    payload = {"query": "TTL expiry test query"}
+    r1 = client.post("/api/query", json=payload)
+    assert r1.status_code == 200
+    assert mock_retrieve.call_count == 1
 
-    main_mod._RESPONSE_CACHE.clear()
-    try:
-        payload = {"query": "TTL expiry test query"}
-        r1 = client.post("/api/query", json=payload)
-        assert r1.status_code == 200
-        assert mock_retrieve.call_count == 1
-
-        r2 = client.post("/api/query", json=payload)
-        assert r2.status_code == 200
-        assert mock_retrieve.call_count == 2
-    finally:
-        main_mod._RESPONSE_CACHE.clear()
+    r2 = client.post("/api/query", json=payload)
+    assert r2.status_code == 200
+    assert mock_retrieve.call_count == 2
 
 
 @patch("app.main._CACHE_MAX", 3)
@@ -94,14 +98,10 @@ def test_query_endpoint_cache_eviction(mock_retrieve, mock_generate):
 
     import app.main as main_mod
 
-    main_mod._RESPONSE_CACHE.clear()
-    try:
-        for i in range(5):
-            client.post("/api/query", json={"query": f"Distinct query {i} unique"})
-        assert mock_retrieve.call_count == 5
-        assert len(main_mod._RESPONSE_CACHE) <= 3
-    finally:
-        main_mod._RESPONSE_CACHE.clear()
+    for i in range(5):
+        client.post("/api/query", json={"query": f"Distinct query {i} unique"})
+    assert mock_retrieve.call_count == 5
+    assert len(main_mod._RESPONSE_CACHE) <= 3
 
 
 @patch("app.main.generate_answer", new_callable=AsyncMock)
@@ -156,23 +156,6 @@ def test_lifespan_calls_setup_logging(mock_setup_logging):
     mock_setup_logging.assert_called()
 
 
-def _parse_sse_events(text: str) -> list[dict]:
-    """Parse SSE text into list of {event, data} dicts."""
-    import json
-    events = []
-    for block in text.split("\n\n"):
-        if not block.strip():
-            continue
-        event = data = None
-        for line in block.strip().split("\n"):
-            if line.startswith("event: "):
-                event = line[7:]
-            elif line.startswith("data: "):
-                data = json.loads(line[6:])
-        if event and data is not None:
-            events.append({"event": event, "data": data})
-    return events
-
 
 @patch("app.main.generate_answer_stream")
 @patch("app.main.retrieve", new_callable=AsyncMock)
@@ -190,7 +173,7 @@ def test_query_stream_endpoint(mock_retrieve, mock_stream):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     event_types = [e["event"] for e in events]
     assert "retrieval" in event_types
     assert "token" in event_types
@@ -214,7 +197,7 @@ def test_query_stream_skips_unknown_event_types(mock_retrieve, mock_stream):
 
     response = client.post("/api/query/stream", json={"query": "test"})
     assert response.status_code == 200
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     assert events[-1]["event"] == "done"
 
 
@@ -232,7 +215,7 @@ def test_capability_stream_endpoint(mock_retrieve, mock_stream):
     response = client.post("/api/capabilities/explain_code/stream", json={"query": "Explain DGESV"})
     assert response.status_code == 200
 
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     assert events[-1]["event"] == "done"
 
 
@@ -263,7 +246,7 @@ def test_eval_stream_chunks_without_file_path(mock_retrieve):
     )
 
     response = client.get("/api/eval/stream")
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     progress_events = [e for e in events if e["event"] == "progress"]
     assert len(progress_events) == len(EVAL_QUERIES)
     first = progress_events[0]["data"]
@@ -281,7 +264,7 @@ def test_eval_stream_deduplicates_file_paths(mock_retrieve):
     )
 
     response = client.get("/api/eval/stream")
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     first_progress = [e for e in events if e["event"] == "progress"][0]["data"]
     assert first_progress["retrieved_files"].count("dgesv.f") == 1
 
@@ -291,7 +274,7 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     mock_retrieve.return_value = _EVAL_RETRIEVE
 
     response = client.get("/api/eval/stream")
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
 
     progress_events = [e for e in events if e["event"] == "progress"]
     assert len(progress_events) == len(EVAL_QUERIES)
@@ -311,7 +294,7 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     mock_retrieve.return_value = _EVAL_RETRIEVE
 
     response = client.get("/api/eval/stream")
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
 
     assert events[-1]["event"] == "summary"
     summary = events[-1]["data"]
@@ -342,7 +325,7 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
 
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     progress_events = [e for e in events if e["event"] == "progress"]
     assert len(progress_events) == len(E2E_EVAL_QUERIES)
 
@@ -372,7 +355,7 @@ def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate):
 
     response = client.get("/api/eval/e2e/stream")
     assert response.status_code == 200
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     progress_events = [e for e in events if e["event"] == "progress"]
     assert len(progress_events) >= 1
     failed = [p for p in progress_events if not p["data"].get("passed", True)]
@@ -387,15 +370,38 @@ def test_models_endpoint():
     data = response.json()
     assert "models" in data
     models = data["models"]
-    assert len(models) >= 9
+    assert len(models) >= 12  # 9 OpenAI + 3 Gemini
     names = [m["name"] for m in models]
     assert "gpt-4o-mini" in names
     assert "gpt-4o" in names
+    assert "gemini-2.0-flash" in names
     defaults = [m for m in models if m.get("default")]
     assert len(defaults) == 1
     for m in models:
         assert "input_cost_per_1m" in m
         assert "output_cost_per_1m" in m
+        assert "available" in m
+        assert "provider" in m
+
+
+@patch("app.main.get_settings")
+def test_models_endpoint_available_field(mock_settings):
+    """Models endpoint returns available=True/False based on API keys."""
+    settings = MagicMock()
+    settings.OPENAI_API_KEY = "sk-test"
+    settings.GEMINI_API_KEY = ""
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    response = client.get("/api/models")
+    data = response.json()
+    models = data["models"]
+
+    openai_models = [m for m in models if m["provider"] == "openai"]
+    gemini_models = [m for m in models if m["provider"] == "gemini"]
+
+    assert all(m["available"] for m in openai_models)
+    assert all(not m["available"] for m in gemini_models)
 
 
 # --- Trial CRUD endpoint tests ---
@@ -439,6 +445,171 @@ def test_delete_trial_not_found(mock_delete):
     assert response.status_code == 404
 
 
+# --- Collections endpoint ---
+
+@patch("app.main.get_qdrant_client")
+def test_collections_endpoint(mock_get_client):
+    """Collections endpoint returns only ingested embedding models."""
+    mock_client = MagicMock()
+    coll1 = MagicMock()
+    coll1.name = "lapack-text-embedding-3-small"
+    coll2 = MagicMock()
+    coll2.name = "lapack-voyage-code-3"
+    coll3 = MagicMock()
+    coll3.name = "unrelated-collection"
+    mock_client.get_collections.return_value = MagicMock(collections=[coll1, coll2, coll3])
+    mock_get_client.return_value = mock_client
+
+    response = client.get("/api/collections")
+    assert response.status_code == 200
+    data = response.json()
+    names = [m["name"] for m in data["models"]]
+    assert "text-embedding-3-small" in names
+    assert "voyage-code-3" in names
+    assert len(names) == 2  # unrelated-collection not included
+
+
+@patch("app.main.get_qdrant_client")
+def test_collections_endpoint_qdrant_error(mock_get_client):
+    """Collections endpoint returns empty list when get_qdrant_client raises."""
+    mock_get_client.side_effect = Exception("Connection refused")
+    response = client.get("/api/collections")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["models"] == []
+    assert "error" in data
+
+
+@patch("app.main.get_qdrant_client")
+def test_collections_endpoint_qdrant_get_collections_error(mock_get_client):
+    """Collections endpoint returns empty list when get_collections() raises."""
+    mock_client = MagicMock()
+    mock_client.get_collections.side_effect = Exception("Timeout")
+    mock_get_client.return_value = mock_client
+    response = client.get("/api/collections")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["models"] == []
+    assert "error" in data
+
+
+@patch("app.main.get_qdrant_client")
+def test_collections_endpoint_no_matches(mock_get_client):
+    """Collections endpoint returns empty when no collections match the registry."""
+    mock_client = MagicMock()
+    coll = MagicMock()
+    coll.name = "unrelated-collection"
+    mock_client.get_collections.return_value = MagicMock(collections=[coll])
+    mock_get_client.return_value = mock_client
+    response = client.get("/api/collections")
+    assert response.status_code == 200
+    assert response.json() == {"models": []}
+
+
+@patch("app.main.get_qdrant_client")
+def test_collections_endpoint_empty_qdrant(mock_get_client):
+    """Collections endpoint returns empty when Qdrant has no collections."""
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value = MagicMock(collections=[])
+    mock_get_client.return_value = mock_client
+    response = client.get("/api/collections")
+    assert response.status_code == 200
+    assert response.json() == {"models": []}
+
+
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_endpoint_with_embedding_model(mock_retrieve, mock_generate):
+    """Query endpoint passes embedding_model through to retrieve."""
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "t.f"}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result()
+
+    response = client.post("/api/query", json={
+        "query": "test embedding model param",
+        "embedding_model": "voyage-code-3",
+    })
+    assert response.status_code == 200
+    _, kwargs = mock_retrieve.call_args
+    assert kwargs.get("collection_name") == "lapack-voyage-code-3"
+    assert kwargs.get("embedding_model") == "voyage-code-3"
+
+
+@patch("app.main.generate_answer", new_callable=AsyncMock)
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_cache_key_differs_by_embedding_model(mock_retrieve, mock_generate):
+    """Same query with different embedding_model values produces separate cache entries."""
+    mock_retrieve.return_value = make_retrieve_result(
+        chunks=[{"id": "x", "text": "t", "score": 0.9, "metadata": {"file_path": "t.f"}, "_match_type": "vector"}],
+    )
+    mock_generate.return_value = make_generate_result()
+
+    payload_a = {"query": "cache key emb test", "embedding_model": "text-embedding-3-small"}
+    payload_b = {"query": "cache key emb test", "embedding_model": "voyage-code-3"}
+    client.post("/api/query", json=payload_a)
+    client.post("/api/query", json=payload_b)
+    assert mock_retrieve.call_count == 2  # not cached across different embedding models
+
+
+@patch("app.main.generate_answer_stream")
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_stream_with_embedding_model(mock_retrieve, mock_stream):
+    """Stream endpoint passes embedding_model through to retrieve."""
+    mock_retrieve.return_value = make_retrieve_result()
+
+    async def async_gen(*args, **kwargs):
+        yield {"type": "token", "token": "Hi"}
+        yield {"type": "done", "citations": [], "token_usage": {}}
+
+    mock_stream.side_effect = async_gen
+
+    response = client.post("/api/query/stream", json={
+        "query": "test stream emb model",
+        "embedding_model": "voyage-code-3",
+    })
+    assert response.status_code == 200
+    _, kwargs = mock_retrieve.call_args
+    assert kwargs.get("collection_name") == "lapack-voyage-code-3"
+    assert kwargs.get("embedding_model") == "voyage-code-3"
+
+
+def test_query_endpoint_rejects_unknown_embedding_model():
+    """Query endpoint returns 422 for unknown embedding_model."""
+    response = client.post("/api/query", json={
+        "query": "test unknown model",
+        "embedding_model": "nonexistent-model",
+    })
+    assert response.status_code == 422
+
+
+# --- Embedding models endpoint ---
+
+@patch("app.main.get_settings")
+def test_embedding_models_endpoint(mock_settings):
+    """Embedding models endpoint returns all registered models with availability."""
+    settings = MagicMock()
+    settings.OPENAI_API_KEY = "sk-test"
+    settings.VOYAGE_API_KEY = ""
+    settings.GEMINI_API_KEY = ""
+    settings.COHERE_API_KEY = ""
+    mock_settings.return_value = settings
+
+    response = client.get("/api/embedding-models")
+    assert response.status_code == 200
+    data = response.json()
+    assert "models" in data
+    models = data["models"]
+    names = [m["name"] for m in models]
+    assert "text-embedding-3-small" in names
+    assert "voyage-code-3" in names
+    # OpenAI models available, Voyage not
+    openai_models = [m for m in models if m["provider"] == "openai"]
+    voyage_models = [m for m in models if m["provider"] == "voyage"]
+    assert all(m["available"] for m in openai_models)
+    assert all(not m["available"] for m in voyage_models)
+
+
 # --- Model param on query/eval endpoints ---
 
 @patch("app.main.generate_answer", new_callable=AsyncMock)
@@ -450,16 +621,11 @@ def test_query_endpoint_with_model(mock_retrieve, mock_generate):
     )
     mock_generate.return_value = make_generate_result(model="gpt-4o")
 
-    import app.main as main_mod
-    main_mod._RESPONSE_CACHE.clear()
-    try:
-        response = client.post("/api/query", json={"query": "test model param", "model": "gpt-4o"})
-        assert response.status_code == 200
-        mock_retrieve.assert_called_once()
-        _, kwargs = mock_retrieve.call_args
-        assert kwargs.get("model") == "gpt-4o" or mock_retrieve.call_args[1].get("model") == "gpt-4o"
-    finally:
-        main_mod._RESPONSE_CACHE.clear()
+    response = client.post("/api/query", json={"query": "test model param", "model": "gpt-4o"})
+    assert response.status_code == 200
+    mock_retrieve.assert_called_once()
+    _, kwargs = mock_retrieve.call_args
+    assert kwargs.get("model") == "gpt-4o"
 
 
 @patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
@@ -468,7 +634,7 @@ def test_eval_stream_with_model_param(mock_retrieve):
     mock_retrieve.return_value = _EVAL_RETRIEVE
     response = client.get("/api/eval/stream?model=gpt-4o")
     assert response.status_code == 200
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     assert any(e["event"] == "summary" for e in events)
 
 
@@ -483,7 +649,7 @@ def test_ingest_stream_returns_sse(mock_gen):
     response = client.get("/api/ingest/stream?embedding_model=text-embedding-3-small")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    events = _parse_sse_events(response.text)
+    events = parse_sse_events(response.text)
     event_types = [e["event"] for e in events]
     assert "progress" in event_types
     assert "summary" in event_types
@@ -531,3 +697,60 @@ async def test_warm_cache_handles_errors(mock_build):
     from app.main import _warm_cache, _WARMUP_QUERIES, _WARMUP_MODELS
     await _warm_cache()  # should not raise
     assert mock_build.call_count == len(_WARMUP_QUERIES) * len(_WARMUP_MODELS)
+
+
+# --- Audit issue #2: embedding_model validation on eval endpoints ---
+
+def test_eval_stream_rejects_unknown_embedding_model():
+    """Eval stream returns 422 for invalid embedding_model."""
+    response = client.get("/api/eval/stream?embedding_model=fake")
+    assert response.status_code == 422
+
+
+def test_e2e_eval_stream_rejects_unknown_embedding_model():
+    """E2E eval stream returns 422 for invalid embedding_model."""
+    response = client.get("/api/eval/e2e/stream?embedding_model=fake")
+    assert response.status_code == 422
+
+
+# --- Audit issue #3: expand endpoint tests ---
+
+@patch("app.main._expand_query", new_callable=AsyncMock)
+@patch("app.main._extract_routine_name")
+def test_expand_endpoint_with_routine_name(mock_extract, mock_expand):
+    """Expand endpoint returns empty expanded_names when query contains a routine name."""
+    mock_extract.return_value = "DGESV"
+    response = client.post("/api/expand", json={"query": "What is DGESV?"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["expanded_names"] == []
+    assert "query_hash" in data
+    mock_expand.assert_not_called()
+
+
+@patch("app.main._expand_query", new_callable=AsyncMock)
+@patch("app.main._extract_routine_name")
+def test_expand_endpoint_with_conceptual_query(mock_extract, mock_expand):
+    """Expand endpoint returns expanded names for conceptual queries."""
+    mock_extract.return_value = None
+    mock_expand.return_value = ["DGETRF", "DGESV"]
+    response = client.post("/api/expand", json={"query": "How does LU work?"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["expanded_names"] == ["DGETRF", "DGESV"]
+    assert "query_hash" in data
+    mock_expand.assert_called_once()
+
+
+# --- Audit issue #4: query stream retrieval error ---
+
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_stream_endpoint_retrieve_error(mock_retrieve):
+    """Stream endpoint yields error SSE event when retrieve raises."""
+    mock_retrieve.side_effect = Exception("Qdrant timeout")
+    response = client.post("/api/query/stream", json={"query": "test error"})
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    error_events = [e for e in events if e["event"] == "error"]
+    assert len(error_events) >= 1
+    assert "Qdrant timeout" in error_events[0]["data"]["message"]

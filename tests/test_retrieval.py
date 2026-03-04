@@ -70,6 +70,28 @@ async def test_expand_query_exception_returns_empty(mock_settings, mock_client_f
     assert result == []
 
 
+@patch("app.services.retrieval.get_settings")
+@patch("app.services.gemini_helpers.get_gemini_client")
+@pytest.mark.asyncio
+async def test_expand_query_gemini_dispatch(mock_gemini_fn, mock_settings):
+    """_expand_query dispatches to Gemini for gemini-* models."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    mock_response = MagicMock()
+    mock_response.text = "DGESVD DGESDD DGESVDX"
+    mock_gemini_client = MagicMock()
+    mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+    mock_gemini_fn.return_value = mock_gemini_client
+
+    result = await _expand_query("How does SVD work?", model="gemini-2.0-flash")
+
+    assert "DGESVD" in result
+    assert "DGESDD" in result
+    mock_gemini_client.aio.models.generate_content.assert_called_once()
+
+
 # --- retrieve() tests using retrieval_mocks fixture ---
 
 @pytest.mark.asyncio
@@ -287,3 +309,23 @@ async def test_retrieve_impact_analysis_finds_callers(retrieval_mocks):
 
     assert any(c.get("_match_type") == "called_by" for c in result["chunks"])
     mock_caller.assert_called_once()
+
+
+# --- Audit issue #7: retrieve with prefetched expanded_names ---
+
+@pytest.mark.asyncio
+async def test_retrieve_with_prefetched_expanded_names(retrieval_mocks):
+    """retrieve skips _expand_query when expanded_names are provided."""
+    mock_embed, mock_search_by_name, mock_search = retrieval_mocks
+    mock_search_by_name.return_value = [
+        {"id": "e1", "score": 0.9, "text": "t", "metadata": {"unit_name": "DGESV"}},
+    ]
+    mock_search.return_value = []
+
+    with patch("app.services.retrieval._expand_query", new_callable=AsyncMock) as mock_expand:
+        result = await retrieve("How does LU work?", top_k=5, expanded_names=["DGESV"])
+        mock_expand.assert_not_called()
+
+    assert result["retrieval_strategy"] == "expansion"
+    assert result["expanded_names"] == ["DGESV"]
+    assert any(c.get("_match_type") == "expansion" for c in result["chunks"])

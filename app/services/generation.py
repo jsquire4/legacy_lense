@@ -12,8 +12,13 @@ from functools import lru_cache
 from openai import AsyncOpenAI
 
 from app.config import get_settings
-from app.models_data import is_reasoning_model, uses_legacy_max_tokens
+from app.models_data import get_provider, is_reasoning_model, uses_legacy_max_tokens
 from app.services.capabilities import CAPABILITIES, DEFAULT_SYSTEM_PROMPT
+from app.services.gemini_helpers import (
+    get_gemini_client as _get_gemini_client,
+    messages_to_gemini as _messages_to_gemini,
+    build_gemini_config as _build_gemini_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,31 @@ def _get_generation_client() -> AsyncOpenAI:
     settings = get_settings()
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=1)
 
+
+
 CONTEXT_TOKEN_BUDGET = 3000
+
+
+def _extract_openai_usage(usage) -> dict:
+    """Extract token usage from OpenAI response.usage or chunk.usage."""
+    if usage is None:
+        return {}
+    return {
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+    }
+
+
+def _extract_gemini_usage(usage_metadata) -> dict:
+    """Extract token usage from Gemini usage_metadata."""
+    if usage_metadata is None:
+        return {}
+    return {
+        "prompt_tokens": usage_metadata.prompt_token_count or 0,
+        "completion_tokens": usage_metadata.candidates_token_count or 0,
+        "total_tokens": usage_metadata.total_token_count or 0,
+    }
 
 
 def _token_limit_key(model: str) -> str:
@@ -83,19 +112,6 @@ def _assemble_context(
     return "\n\n---\n\n".join(context_parts)
 
 
-def _strip_markdown(text: str) -> str:
-    """Strip markdown formatting from LLM output."""
-    # Headers: ### Foo → Foo
-    text = re.sub(r'^#{1,4}\s+', '', text, flags=re.MULTILINE)
-    # Bold/italic: **foo** or *foo* → foo
-    text = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', text)
-    # Bullet lists: - foo or * foo → foo
-    text = re.sub(r'^[\s]*[-*]\s+', '', text, flags=re.MULTILINE)
-    # Numbered lists: 1. foo → foo
-    text = re.sub(r'^[\s]*\d+\.\s+', '', text, flags=re.MULTILINE)
-    return text
-
-
 def _extract_citations_from_text(text: str) -> list[str]:
     """Extract file:line citations from generated text."""
     pattern = r'[\w/.-]+\.(?:f(?:90|95|03|08)?|for|fpp):\d+(?:-\d+)?'
@@ -147,6 +163,42 @@ Question: {query}"""
     ]
 
 
+
+async def _gemini_generate(model: str, messages: list[dict], max_completion_tokens: int) -> tuple[str, dict]:
+    """Non-streaming Gemini generation. Returns (text, token_usage)."""
+    client = _get_gemini_client()
+    system_instruction, contents = _messages_to_gemini(messages)
+    config = _build_gemini_config(system_instruction, max_completion_tokens)
+
+    response = await client.aio.models.generate_content(
+        model=model, contents=contents, config=config,
+    )
+
+    try:
+        answer_text = response.text or ""
+    except ValueError:
+        # Gemini SDK raises ValueError when response is blocked (safety/recitation)
+        answer_text = ""
+    return answer_text, _extract_gemini_usage(response.usage_metadata)
+
+
+async def _gemini_generate_stream(model: str, messages: list[dict], max_completion_tokens: int):
+    """Streaming Gemini generation. Yields (chunk_text, usage_metadata) tuples."""
+    client = _get_gemini_client()
+    system_instruction, contents = _messages_to_gemini(messages)
+    config = _build_gemini_config(system_instruction, max_completion_tokens)
+
+    stream = await client.aio.models.generate_content_stream(
+        model=model, contents=contents, config=config,
+    )
+    async for chunk in stream:
+        try:
+            text = chunk.text or ""
+        except ValueError:
+            text = ""
+        yield text, chunk.usage_metadata
+
+
 async def generate_answer(
     query: str,
     chunks: list[dict],
@@ -162,8 +214,8 @@ async def generate_answer(
     (returned as ttft_ms in the result dict).
     """
     settings = get_settings()
-    client = _get_generation_client()
     resolved_model = model or settings.CHAT_MODEL
+    provider = get_provider(resolved_model)
 
     if not chunks:
         logger.warning("No chunks retrieved for query: %.80s", query)
@@ -176,32 +228,42 @@ async def generate_answer(
 
     messages = _build_messages(query, chunks, capability, context_budget)
 
-    if track_ttft:
-        answer_text, token_usage, ttft_ms = await _generate_with_ttft(
-            client, resolved_model, messages, max_completion_tokens,
-        )
+    if provider == "gemini":
+        if track_ttft:
+            answer_text, token_usage, ttft_ms = await _gemini_generate_with_ttft(
+                resolved_model, messages, max_completion_tokens,
+            )
+        else:
+            try:
+                answer_text, token_usage = await _gemini_generate(
+                    resolved_model, messages, max_completion_tokens,
+                )
+            except Exception as e:
+                logger.error("Gemini generation failed (model=%s): %s", resolved_model, e)
+                raise
+            ttft_ms = None
     else:
-        kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens)
-        try:
-            response = await client.chat.completions.create(**kwargs)
-        except Exception as e:
-            logger.error("LLM generation failed (model=%s): %s", resolved_model, e)
-            raise
+        client = _get_generation_client()
+        if track_ttft:
+            answer_text, token_usage, ttft_ms = await _generate_with_ttft(
+                client, resolved_model, messages, max_completion_tokens,
+            )
+        else:
+            kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens)
+            try:
+                response = await client.chat.completions.create(**kwargs)
+            except Exception as e:
+                logger.error("LLM generation failed (model=%s): %s", resolved_model, e)
+                raise
 
-        answer_text = ""
-        if len(response.choices) > 0:
-            message = response.choices[0].message
-            if message.content is not None:
-                answer_text = message.content
+            answer_text = ""
+            if len(response.choices) > 0:
+                message = response.choices[0].message
+                if message.content is not None:
+                    answer_text = message.content
 
-        token_usage = {}
-        if response.usage is not None:
-            token_usage = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens,
-            }
-        ttft_ms = None
+            token_usage = _extract_openai_usage(response.usage)
+            ttft_ms = None
 
     citations = _extract_citations_from_text(answer_text)
 
@@ -223,7 +285,7 @@ async def generate_answer(
 
 
 async def _generate_with_ttft(client, model, messages, max_completion_tokens):
-    """Stream a completion and measure time-to-first-token."""
+    """Stream a completion and measure time-to-first-token (OpenAI)."""
     t0 = time.time()
     kwargs = _build_llm_kwargs(model, messages, max_completion_tokens, stream=True)
     try:
@@ -237,18 +299,38 @@ async def _generate_with_ttft(client, model, messages, max_completion_tokens):
     ttft_ms = None
 
     async for chunk in stream:
-        if chunk.usage is not None:
-            token_usage = {
-                "prompt_tokens": chunk.usage.prompt_tokens,
-                "completion_tokens": chunk.usage.completion_tokens,
-                "total_tokens": chunk.usage.total_tokens,
-            }
+        usage = _extract_openai_usage(chunk.usage)
+        if usage:
+            token_usage = usage
         if chunk.choices:
             delta = chunk.choices[0].delta
             if delta.content:
                 if ttft_ms is None:
                     ttft_ms = round((time.time() - t0) * 1000, 1)
                 accumulated.append(delta.content)
+
+    return "".join(accumulated), token_usage, ttft_ms
+
+
+async def _gemini_generate_with_ttft(model, messages, max_completion_tokens):
+    """Stream a Gemini completion and measure time-to-first-token."""
+    t0 = time.time()
+    accumulated = []
+    token_usage = {}
+    ttft_ms = None
+
+    try:
+        async for text, usage_metadata in _gemini_generate_stream(model, messages, max_completion_tokens):
+            if text:
+                if ttft_ms is None:
+                    ttft_ms = round((time.time() - t0) * 1000, 1)
+                accumulated.append(text)
+            usage = _extract_gemini_usage(usage_metadata)
+            if usage:
+                token_usage = usage
+    except Exception as e:
+        logger.error("Gemini streaming (ttft) failed (model=%s): %s", model, e)
+        raise
 
     return "".join(accumulated), token_usage, ttft_ms
 
@@ -268,8 +350,8 @@ async def generate_answer_stream(
         {"type": "done", "citations": list, "token_usage": dict} — final
     """
     settings = get_settings()
-    client = _get_generation_client()
     resolved_model = model or settings.CHAT_MODEL
+    provider = get_provider(resolved_model)
 
     if not chunks:
         logger.warning("No chunks retrieved for query: %.80s", query)
@@ -282,32 +364,49 @@ async def generate_answer_stream(
 
     messages = _build_messages(query, chunks, capability, context_budget)
 
-    kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens, stream=True)
+    if provider == "gemini":
+        accumulated = []
+        token_usage = {}
 
-    try:
-        stream = await client.chat.completions.create(**kwargs)
-    except Exception as e:
-        logger.error("LLM stream generation failed (model=%s): %s", resolved_model, e)
-        yield {"type": "error", "message": str(e)}
-        return
+        try:
+            async for text, usage_metadata in _gemini_generate_stream(
+                resolved_model, messages, max_completion_tokens,
+            ):
+                if text:
+                    accumulated.append(text)
+                    yield {"type": "token", "token": text}
+                usage = _extract_gemini_usage(usage_metadata)
+                if usage:
+                    token_usage = usage
+        except Exception as e:
+            logger.error("Gemini stream generation failed (model=%s): %s", resolved_model, e)
+            yield {"type": "error", "message": str(e)}
+            return
+    else:
+        client = _get_generation_client()
+        kwargs = _build_llm_kwargs(resolved_model, messages, max_completion_tokens, stream=True)
 
-    accumulated = []
-    token_usage = {}
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            logger.error("LLM stream generation failed (model=%s): %s", resolved_model, e)
+            yield {"type": "error", "message": str(e)}
+            return
 
-    async for chunk in stream:
-        if chunk.usage is not None:
-            token_usage = {
-                "prompt_tokens": chunk.usage.prompt_tokens,
-                "completion_tokens": chunk.usage.completion_tokens,
-                "total_tokens": chunk.usage.total_tokens,
-            }
+        accumulated = []
+        token_usage = {}
 
-        if chunk.choices:
-            delta = chunk.choices[0].delta
-            content = delta.content
-            if content:
-                accumulated.append(content)
-                yield {"type": "token", "token": content}
+        async for chunk in stream:
+            usage = _extract_openai_usage(chunk.usage)
+            if usage:
+                token_usage = usage
+
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                content = delta.content
+                if content:
+                    accumulated.append(content)
+                    yield {"type": "token", "token": content}
 
     full_text = "".join(accumulated)
     citations = _extract_citations_from_text(full_text)

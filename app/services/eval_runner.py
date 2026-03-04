@@ -76,7 +76,7 @@ async def eval_stream_generator(model: str | None = None, embedding_model: str |
     })
 
 
-async def e2e_eval_stream_generator(model: str | None = None):
+async def e2e_eval_stream_generator(model: str | None = None, embedding_model: str | None = None):
     """Async generator — batch retrieval, then generate sequentially.
 
     Retrieval is fast (Qdrant + embed) and safe to fully parallelize.
@@ -87,10 +87,17 @@ async def e2e_eval_stream_generator(model: str | None = None):
     total_passed = 0
     total_latency = 0.0
 
+    collection_name = None
+    if embedding_model:
+        from app.embedding_registry import collection_name_for_model
+        collection_name = collection_name_for_model("lapack", embedding_model)
+
     # Phase 1: batch all retrievals concurrently (fast)
     async def run_retrieval(i, item):
         return i, item, await retrieve(item["query"], top_k=5, model=model,
-                                       capability=item.get("capability"))
+                                       capability=item.get("capability"),
+                                       collection_name=collection_name,
+                                       embedding_model=embedding_model)
 
     retrieval_results = await asyncio.gather(*[
         run_retrieval(i, item) for i, item in enumerate(E2E_EVAL_QUERIES)
@@ -104,12 +111,28 @@ async def e2e_eval_stream_generator(model: str | None = None):
         chunks = retrieval_result["chunks"]
 
         t0 = time.time()
-        gen_result = await generate_answer(
-            query, chunks, capability,
-            max_completion_tokens=_E2E_MAX_TOKENS,
-            context_budget=_E2E_CONTEXT_BUDGET,
-            model=model,
-        )
+        try:
+            gen_result = await generate_answer(
+                query, chunks, capability,
+                max_completion_tokens=_E2E_MAX_TOKENS,
+                context_budget=_E2E_CONTEXT_BUDGET,
+                model=model,
+            )
+        except Exception as e:
+            logger.error("E2E eval generation failed for query %d: %s", i, e)
+            yield _sse_event("progress", {
+                "index": i,
+                "query": query,
+                "capability": capability,
+                "passed": False,
+                "checks": {"pass": False, "error": str(e)},
+                "latency_ms": round((time.time() - t0) * 1000, 1),
+                "citations": [],
+                "answer_preview": f"[Generation error: {e}]",
+                "answer_length": 0,
+            })
+            total_latency += round((time.time() - t0) * 1000, 1)
+            continue
         latency_ms = round((time.time() - t0) * 1000, 1)
 
         check_results = check_e2e_result(

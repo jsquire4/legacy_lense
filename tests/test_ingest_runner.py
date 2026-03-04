@@ -1,36 +1,16 @@
 """Tests for the ingestion benchmarking SSE stream generator."""
 
-import asyncio
-import json
 from unittest.mock import patch, MagicMock
 
 import pytest
 
 from app.services.ingest_runner import ingest_stream_generator
-
-
-def _parse_sse(text: str) -> dict:
-    """Parse a single SSE event string into {event, data}."""
-    event = data = None
-    for line in text.strip().split("\n"):
-        if line.startswith("event: "):
-            event = line[7:]
-        elif line.startswith("data: "):
-            data = json.loads(line[6:])
-    return {"event": event, "data": data}
-
-
-async def _collect_events(gen) -> list[dict]:
-    """Collect all SSE events from an async generator."""
-    events = []
-    async for raw in gen:
-        events.append(_parse_sse(raw))
-    return events
+from tests.helpers import collect_sse_events
 
 
 @pytest.mark.asyncio
 async def test_unknown_model_emits_error():
-    events = await _collect_events(ingest_stream_generator("nonexistent-model"))
+    events = await collect_sse_events(ingest_stream_generator("nonexistent-model"))
     assert len(events) == 1
     assert events[0]["event"] == "error"
     assert "Unknown embedding model" in events[0]["data"]["message"]
@@ -70,7 +50,7 @@ async def test_successful_ingestion_emits_correct_events(
         mock_embed.return_value = [[0.1] * 1536]
         mock_delete_coll.return_value = True
 
-        events = await _collect_events(
+        events = await collect_sse_events(
             ingest_stream_generator("text-embedding-3-small")
         )
 
@@ -116,7 +96,7 @@ async def test_missing_data_dir_emits_error(mock_settings, mock_find):
 
     from pathlib import Path
     with patch.object(Path, "exists", return_value=False):
-        events = await _collect_events(
+        events = await collect_sse_events(
             ingest_stream_generator("text-embedding-3-small")
         )
 
@@ -136,10 +116,95 @@ async def test_no_files_found_emits_error(mock_settings, mock_find):
     from pathlib import Path
     with patch.object(Path, "exists", return_value=True):
         mock_find.return_value = []
-        events = await _collect_events(
+        events = await collect_sse_events(
             ingest_stream_generator("text-embedding-3-small")
         )
 
     assert len(events) == 1
     assert events[0]["event"] == "error"
     assert "No Fortran files" in events[0]["data"]["message"]
+
+
+# --- Audit issue #21: Ingest error handling ---
+
+@pytest.mark.asyncio
+@patch("app.services.ingest_runner.embed_texts")
+@patch("app.services.ingest_runner.ensure_collection")
+@patch("app.services.ingest_runner.delete_collection")
+@patch("app.services.ingest_runner.chunk_units")
+@patch("app.services.ingest_runner.parse_file")
+@patch("app.services.ingest_runner._find_fortran_files")
+@patch("app.services.ingest_runner.get_settings")
+async def test_ingest_embed_error(
+    mock_settings, mock_find, mock_parse, mock_chunk,
+    mock_delete_coll, mock_ensure_coll, mock_embed,
+):
+    """Ingestion emits error event when embed_texts raises."""
+    settings = MagicMock()
+    settings.DATA_DIR = "/tmp/fake_data"
+    mock_settings.return_value = settings
+
+    from pathlib import Path
+    with patch.object(Path, "exists", return_value=True):
+        mock_find.return_value = [Path("/tmp/fake_data/SRC/dgesv.f")]
+
+        mock_unit = MagicMock()
+        mock_unit.name = "DGESV"
+        mock_unit.called_routines = []
+        mock_parse.return_value = [mock_unit]
+
+        mock_chunk_obj = MagicMock()
+        mock_chunk_obj.text = "test chunk text"
+        mock_chunk.return_value = [mock_chunk_obj]
+
+        mock_embed.side_effect = RuntimeError("API key invalid")
+
+        # embed_texts error propagates through asyncio.to_thread uncaught
+        with pytest.raises(RuntimeError, match="API key invalid"):
+            await collect_sse_events(
+                ingest_stream_generator("text-embedding-3-small")
+            )
+
+
+@pytest.mark.asyncio
+@patch("app.services.ingest_runner.chunk_units")
+@patch("app.services.ingest_runner.parse_file")
+@patch("app.services.ingest_runner._find_fortran_files")
+@patch("app.services.ingest_runner.get_settings")
+async def test_ingest_parse_error_partial_success(
+    mock_settings, mock_find, mock_parse, mock_chunk,
+):
+    """Ingestion continues when parse_file raises on one file (partial success)."""
+    settings = MagicMock()
+    settings.DATA_DIR = "/tmp/fake_data"
+    mock_settings.return_value = settings
+
+    from pathlib import Path
+    with patch.object(Path, "exists", return_value=True):
+        file1 = Path("/tmp/fake_data/SRC/bad.f")
+        file2 = Path("/tmp/fake_data/SRC/good.f")
+        mock_find.return_value = [file1, file2]
+
+        mock_unit = MagicMock()
+        mock_unit.name = "GOOD"
+        mock_unit.called_routines = []
+
+        def parse_side_effect(fp):
+            if fp == file1:
+                raise RuntimeError("Parse error")
+            return [mock_unit]
+
+        mock_parse.side_effect = parse_side_effect
+        mock_chunk.return_value = []  # No chunks since we're testing parse
+
+        with patch("app.services.ingest_runner.delete_collection"), \
+             patch("app.services.ingest_runner.ensure_collection"), \
+             patch("app.services.ingest_runner.embed_texts", return_value=[]), \
+             patch("app.services.ingest_runner.upsert_chunks"):
+            events = await collect_sse_events(
+                ingest_stream_generator("text-embedding-3-small")
+            )
+
+    event_types = [e["event"] for e in events]
+    # Should still produce summary even with one file failing to parse
+    assert "summary" in event_types

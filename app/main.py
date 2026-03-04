@@ -23,6 +23,8 @@ from app.services.capabilities import CAPABILITIES
 from app.services.trial_store import save_trial, list_trials, delete_trial
 from app.services.eval_runner import eval_stream_generator, e2e_eval_stream_generator
 from app.services.ingest_runner import ingest_stream_generator
+from app.services.vector_store import get_qdrant_client
+from app.embedding_registry import EMBEDDING_MODELS, collection_name_for_model
 from app.models_data import MODELS
 from app.logging_config import setup_logging
 from app.sse import sse_event as _sse_event
@@ -37,10 +39,15 @@ _CACHE_MAX = 64
 _CACHE_TTL = 300  # 5 minutes
 
 
+def _resolve_collection(embedding_model: str | None) -> str | None:
+    """Map an optional embedding model name to a Qdrant collection name."""
+    return collection_name_for_model("lapack", embedding_model) if embedding_model else None
+
+
 def _cache_key(query: str, top_k: int, capability: str | None, model: str | None = None,
-               expanded_names: list[str] | None = None) -> str:
+               expanded_names: list[str] | None = None, embedding_model: str | None = None) -> str:
     names_part = ",".join(sorted(expanded_names)) if expanded_names else ""
-    raw = f"{query}|{top_k}|{capability}|{model}|{names_part}"
+    raw = f"{query}|{top_k}|{capability}|{model}|{names_part}|{embedding_model}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
@@ -75,7 +82,11 @@ _WARMUP_MODELS = ["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano"]
 
 
 async def _warm_cache():
-    """Pre-cache responses for the default example queries across cheap models."""
+    """Pre-cache responses for the default example queries across cheap models.
+
+    Note: embedding_model is intentionally omitted — warmup only covers the
+    default collection (text-embedding-3-small).
+    """
     for model in _WARMUP_MODELS:
         for query, capability in _WARMUP_QUERIES:
             try:
@@ -127,9 +138,9 @@ def _build_chunk_details(chunks: list[dict]) -> list[ChunkDetail]:
     return details
 
 
-async def _build_response(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None) -> QueryResponse:
+async def _build_response(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None, embedding_model: str | None = None) -> QueryResponse:
     """Shared logic for query and capability endpoints."""
-    key = _cache_key(query, top_k, capability, model, expanded_names)
+    key = _cache_key(query, top_k, capability, model, expanded_names, embedding_model)
     cached = _cache_get(key)
     if cached is not None:
         logger.info("Cache hit for query: %.80s", query)
@@ -137,8 +148,9 @@ async def _build_response(query: str, top_k: int, capability: str | None = None,
 
     t0 = time.time()
 
+    collection_name = _resolve_collection(embedding_model)
     try:
-        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names)
+        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names, collection_name=collection_name, embedding_model=embedding_model)
     except Exception as e:
         logger.error("Retrieval failed for query '%.80s': %s", query, e)
         raise
@@ -195,14 +207,14 @@ async def _build_response(query: str, top_k: int, capability: str | None = None,
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_endpoint(req: QueryRequest):
-    return await _build_response(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names)
+    return await _build_response(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names, embedding_model=req.embedding_model)
 
 
 @app.post("/api/capabilities/{capability}", response_model=QueryResponse)
 async def capability_endpoint(capability: str, req: CapabilityRequest):
     if capability not in CAPABILITIES:
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
-    return await _build_response(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names)
+    return await _build_response(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names, embedding_model=req.embedding_model)
 
 
 @app.post("/api/expand", response_model=ExpandResponse)
@@ -223,12 +235,13 @@ def _chunk_detail_to_dict(detail: ChunkDetail, text: str = "") -> dict:
     return d
 
 
-async def _stream_generator(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None):
+async def _stream_generator(query: str, top_k: int, capability: str | None = None, model: str | None = None, expanded_names: list[str] | None = None, embedding_model: str | None = None):
     """Async generator that yields SSE events: retrieval, token*, done."""
     t0 = time.time()
 
+    collection_name = _resolve_collection(embedding_model)
     try:
-        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names)
+        retrieval_result = await retrieve(query, top_k, model=model, capability=capability, expanded_names=expanded_names, collection_name=collection_name, embedding_model=embedding_model)
     except Exception as e:
         logger.error("Stream retrieval failed: %s", e)
         yield _sse_event("error", {"message": f"Retrieval failed: {e}"})
@@ -282,7 +295,7 @@ async def _stream_generator(query: str, top_k: int, capability: str | None = Non
 @app.post("/api/query/stream")
 async def query_stream_endpoint(req: QueryRequest):
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names),
+        _stream_generator(req.query, req.top_k, None, model=req.model, expanded_names=req.expanded_names, embedding_model=req.embedding_model),
         media_type="text/event-stream",
     )
 
@@ -293,15 +306,22 @@ async def capability_stream_endpoint(capability: str, req: CapabilityRequest):
         raise HTTPException(status_code=404, detail=f"Unknown capability: {capability}")
 
     return StreamingResponse(
-        _stream_generator(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names),
+        _stream_generator(req.query, req.top_k, capability, model=req.model, expanded_names=req.expanded_names, embedding_model=req.embedding_model),
         media_type="text/event-stream",
     )
 
 
 # --- Eval endpoints ---
 
+def _validate_embedding_model_param(embedding_model: str | None) -> None:
+    """Raise 422 if embedding_model is provided but not in the registry."""
+    if embedding_model is not None and embedding_model not in EMBEDDING_MODELS:
+        raise HTTPException(status_code=422, detail=f"Unknown embedding model: '{embedding_model}'")
+
+
 @app.get("/api/eval/stream")
 async def eval_stream_endpoint(model: str | None = None, embedding_model: str | None = None):
+    _validate_embedding_model_param(embedding_model)
     return StreamingResponse(
         eval_stream_generator(model=model, embedding_model=embedding_model),
         media_type="text/event-stream",
@@ -309,14 +329,16 @@ async def eval_stream_endpoint(model: str | None = None, embedding_model: str | 
 
 
 @app.get("/api/eval/e2e/stream")
-async def e2e_eval_stream_endpoint(model: str | None = None):
+async def e2e_eval_stream_endpoint(model: str | None = None, embedding_model: str | None = None):
+    _validate_embedding_model_param(embedding_model)
     return StreamingResponse(
-        e2e_eval_stream_generator(model=model), media_type="text/event-stream",
+        e2e_eval_stream_generator(model=model, embedding_model=embedding_model), media_type="text/event-stream",
     )
 
 
 @app.get("/api/ingest/stream")
 async def ingest_stream_endpoint(embedding_model: str):
+    _validate_embedding_model_param(embedding_model)
     return StreamingResponse(
         ingest_stream_generator(embedding_model=embedding_model),
         media_type="text/event-stream",
@@ -325,12 +347,49 @@ async def ingest_stream_endpoint(embedding_model: str):
 
 # --- Model & Trial endpoints ---
 
+@app.get("/api/collections")
+async def collections_endpoint():
+    """Return embedding models that have been ingested (have a Qdrant collection)."""
+    try:
+        client = get_qdrant_client()
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, client.get_collections)
+        collections = result.collections
+        existing_names = {c.name for c in collections}
+    except Exception as e:
+        logger.error("Failed to list Qdrant collections: %s", e)
+        return {"models": [], "error": str(e)}
+
+    ingested = []
+    for name, info in EMBEDDING_MODELS.items():
+        coll = collection_name_for_model("lapack", name)
+        if coll in existing_names:
+            ingested.append({
+                "name": info.name,
+                "dimensions": info.dimensions,
+                "provider": info.provider,
+                "collection": coll,
+            })
+    return {"models": ingested}
+
+
 @app.get("/api/embedding-models")
 async def embedding_models_endpoint():
-    from app.embedding_registry import EMBEDDING_MODELS
+    settings = get_settings()
+    available_keys = {
+        "openai": bool(settings.OPENAI_API_KEY),
+        "voyage": bool(settings.VOYAGE_API_KEY),
+        "gemini": bool(settings.GEMINI_API_KEY),
+        "cohere": bool(settings.COHERE_API_KEY),
+    }
     return {
         "models": [
-            {"name": info.name, "dimensions": info.dimensions, "provider": info.provider}
+            {
+                "name": info.name,
+                "dimensions": info.dimensions,
+                "provider": info.provider,
+                "available": available_keys.get(info.provider, False),
+            }
             for info in EMBEDDING_MODELS.values()
         ]
     }
@@ -339,9 +398,20 @@ async def embedding_models_endpoint():
 @app.get("/api/models")
 async def models_endpoint():
     settings = get_settings()
+    available_keys = {
+        "openai": bool(settings.OPENAI_API_KEY),
+        "gemini": bool(settings.GEMINI_API_KEY),
+    }
     return {
         "models": [
-            {"name": name, "default": name == settings.CHAT_MODEL, **info}
+            {
+                "name": name,
+                "default": name == settings.CHAT_MODEL,
+                "available": available_keys.get(info.provider, False),
+                "provider": info.provider,
+                "input_cost_per_1m": info.input_cost_per_1m,
+                "output_cost_per_1m": info.output_cost_per_1m,
+            }
             for name, info in MODELS.items()
         ]
     }
@@ -349,7 +419,7 @@ async def models_endpoint():
 
 @app.post("/api/trials")
 async def create_trial_endpoint(req: TrialRequest):
-    pricing = MODELS.get(req.model, {})
+    pricing = MODELS.get(req.model)
     data = {
         "model": req.model,
         "eval_type": req.eval_type,
@@ -359,8 +429,8 @@ async def create_trial_endpoint(req: TrialRequest):
         "avg_retrieval_latency_ms": req.avg_retrieval_latency_ms,
         "avg_e2e_latency_ms": req.avg_e2e_latency_ms,
         "total_queries": req.total_queries,
-        "input_cost_per_1m": pricing.get("input_cost_per_1m"),
-        "output_cost_per_1m": pricing.get("output_cost_per_1m"),
+        "input_cost_per_1m": pricing.input_cost_per_1m if pricing else None,
+        "output_cost_per_1m": pricing.output_cost_per_1m if pricing else None,
         "embedding_model": req.embedding_model,
         "embedding_dimensions": req.embedding_dimensions,
         "ingestion_time_sec": req.ingestion_time_sec,

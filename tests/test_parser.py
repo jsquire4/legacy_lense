@@ -1,14 +1,10 @@
 """Tests for the Fortran parser service."""
 
-from pathlib import Path
 from unittest.mock import patch, MagicMock
-
-import pytest
 
 from tests.conftest import SAMPLE_FIXED_FORM_MODULE
 
 from app.services.parser import (
-    ParsedUnit,
     _clean_doc_comments,
     _extract_called_routines,
     _extract_doc_comments,

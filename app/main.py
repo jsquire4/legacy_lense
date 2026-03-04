@@ -22,6 +22,7 @@ from app.services.generation import generate_answer, generate_answer_stream
 from app.services.capabilities import CAPABILITIES
 from app.services.trial_store import save_trial, list_trials, delete_trial
 from app.services.eval_runner import eval_stream_generator, e2e_eval_stream_generator
+from app.services.ingest_runner import ingest_stream_generator
 from app.models_data import MODELS
 from app.logging_config import setup_logging
 from app.sse import sse_event as _sse_event
@@ -314,6 +315,14 @@ async def e2e_eval_stream_endpoint(model: str | None = None):
     )
 
 
+@app.get("/api/ingest/stream")
+async def ingest_stream_endpoint(embedding_model: str):
+    return StreamingResponse(
+        ingest_stream_generator(embedding_model=embedding_model),
+        media_type="text/event-stream",
+    )
+
+
 # --- Model & Trial endpoints ---
 
 @app.get("/api/embedding-models")
@@ -354,6 +363,9 @@ async def create_trial_endpoint(req: TrialRequest):
         "output_cost_per_1m": pricing.get("output_cost_per_1m"),
         "embedding_model": req.embedding_model,
         "embedding_dimensions": req.embedding_dimensions,
+        "ingestion_time_sec": req.ingestion_time_sec,
+        "chunks_ingested": req.chunks_ingested,
+        "files_processed": req.files_processed,
         "notes": req.notes,
     }
     trial_id = save_trial(data)

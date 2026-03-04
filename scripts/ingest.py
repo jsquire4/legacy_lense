@@ -57,7 +57,16 @@ def main():
                         help="Qdrant collection name override")
     parser.add_argument("--recreate", action="store_true",
                         help="Delete target collection before ingesting")
+    parser.add_argument("--list-models", action="store_true",
+                        help="List all registered embedding models and exit")
     args = parser.parse_args()
+
+    if args.list_models:
+        print(f"{'Model':<30} {'Provider':<10} {'Dims':>6} {'Max Tokens':>11}")
+        print("-" * 60)
+        for name, info in EMBEDDING_MODELS.items():
+            print(f"{name:<30} {info.provider:<10} {info.dimensions:>6} {info.max_tokens:>11}")
+        return
 
     # Resolve embedding model and collection name
     embedding_model = args.embedding_model

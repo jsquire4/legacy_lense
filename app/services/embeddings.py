@@ -1,5 +1,6 @@
-"""OpenAI embedding service with batching and token pre-truncation."""
+"""Multi-provider embedding service with batching and token pre-truncation."""
 
+import asyncio
 import logging
 from functools import lru_cache
 
@@ -10,8 +11,10 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 512
 
+# ---------------------------------------------------------------------------
+# Tiktoken helpers
+# ---------------------------------------------------------------------------
 
 @lru_cache
 def _get_encoder(encoding_name: str = "cl100k_base"):
@@ -19,16 +22,38 @@ def _get_encoder(encoding_name: str = "cl100k_base"):
 
 
 def _encoder_for_model(model_name: str | None = None):
-    """Get the tiktoken encoder for an embedding model."""
+    """Get the tiktoken encoder for an embedding model, or None for non-OpenAI."""
     if model_name:
         try:
             from app.embedding_registry import get_model_info
             info = get_model_info(model_name)
+            if info.tokenizer is None:
+                return None
             return _get_encoder(info.tokenizer)
         except KeyError:
             pass
     return _get_encoder("cl100k_base")
 
+
+def _truncate_to_tokens(text: str, max_tokens: int, encoder=None) -> str:
+    if encoder is None:
+        return text
+    tokens = encoder.encode(text)
+    if len(tokens) <= max_tokens:
+        return text
+    return encoder.decode(tokens[:max_tokens])
+
+
+def _maybe_truncate(texts: list[str], max_tokens: int, encoder) -> list[str]:
+    """Truncate texts only when a tiktoken encoder is available."""
+    if encoder is None:
+        return texts
+    return [_truncate_to_tokens(t, max_tokens, encoder) for t in texts]
+
+
+# ---------------------------------------------------------------------------
+# Client factories (all @lru_cache)
+# ---------------------------------------------------------------------------
 
 @lru_cache
 def get_openai_client() -> OpenAI:
@@ -42,40 +67,195 @@ def get_async_openai_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=settings.OPENAI_API_KEY, max_retries=3)
 
 
-def _truncate_to_tokens(text: str, max_tokens: int, encoder=None) -> str:
-    enc = encoder or _get_encoder()
-    tokens = enc.encode(text)
-    if len(tokens) <= max_tokens:
-        return text
-    return enc.decode(tokens[:max_tokens])
+@lru_cache
+def _get_voyage_client():
+    import voyageai
+    settings = get_settings()
+    if not settings.VOYAGE_API_KEY:
+        raise RuntimeError("VOYAGE_API_KEY is required to use Voyage AI embeddings")
+    return voyageai.Client(api_key=settings.VOYAGE_API_KEY)
 
 
-# --- Async query path (used by API endpoints) ---
+@lru_cache
+def _get_async_voyage_client():
+    import voyageai
+    settings = get_settings()
+    if not settings.VOYAGE_API_KEY:
+        raise RuntimeError("VOYAGE_API_KEY is required to use Voyage AI embeddings")
+    return voyageai.AsyncClient(api_key=settings.VOYAGE_API_KEY)
+
+
+@lru_cache
+def _get_gemini_client():
+    from google import genai
+    settings = get_settings()
+    if not settings.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY is required to use Gemini embeddings")
+    return genai.Client(api_key=settings.GEMINI_API_KEY)
+
+
+@lru_cache
+def _get_cohere_client():
+    import cohere
+    settings = get_settings()
+    if not settings.COHERE_API_KEY:
+        raise RuntimeError("COHERE_API_KEY is required to use Cohere embeddings")
+    return cohere.Client(api_key=settings.COHERE_API_KEY)
+
+
+@lru_cache
+def _get_async_cohere_client():
+    import cohere
+    settings = get_settings()
+    if not settings.COHERE_API_KEY:
+        raise RuntimeError("COHERE_API_KEY is required to use Cohere embeddings")
+    return cohere.AsyncClient(api_key=settings.COHERE_API_KEY)
+
+
+# ---------------------------------------------------------------------------
+# Sync batch embed functions (ingestion path)
+# ---------------------------------------------------------------------------
+
+_OPENAI_BATCH = 512
+_VOYAGE_BATCH = 128
+_GEMINI_BATCH = 100
+_COHERE_BATCH = 96
+
+
+def _openai_embed_batch(texts: list[str], model: str) -> list[list[float]]:
+    client = get_openai_client()
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), _OPENAI_BATCH):
+        batch = texts[i:i + _OPENAI_BATCH]
+        response = client.embeddings.create(model=model, input=batch)
+        sorted_data = sorted(response.data, key=lambda x: x.index)
+        all_embeddings.extend([d.embedding for d in sorted_data])
+    return all_embeddings
+
+
+def _voyage_embed_batch(texts: list[str], model: str) -> list[list[float]]:
+    client = _get_voyage_client()
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), _VOYAGE_BATCH):
+        batch = texts[i:i + _VOYAGE_BATCH]
+        result = client.embed(batch, model=model, input_type="document")
+        all_embeddings.extend(result.embeddings)
+    return all_embeddings
+
+
+def _gemini_embed_batch(texts: list[str], model: str) -> list[list[float]]:
+    client = _get_gemini_client()
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), _GEMINI_BATCH):
+        batch = texts[i:i + _GEMINI_BATCH]
+        result = client.models.embed_content(model=model, contents=batch)
+        all_embeddings.extend([e.values for e in result.embeddings])
+    return all_embeddings
+
+
+def _cohere_embed_batch(texts: list[str], model: str) -> list[list[float]]:
+    client = _get_cohere_client()
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), _COHERE_BATCH):
+        batch = texts[i:i + _COHERE_BATCH]
+        result = client.embed(
+            texts=batch,
+            model=model,
+            input_type="search_document",
+            embedding_types=["float"],
+        )
+        all_embeddings.extend(result.embeddings.float_)
+    return all_embeddings
+
+
+_SYNC_DISPATCH = {
+    "openai": _openai_embed_batch,
+    "voyage": _voyage_embed_batch,
+    "gemini": _gemini_embed_batch,
+    "cohere": _cohere_embed_batch,
+}
+
+
+# ---------------------------------------------------------------------------
+# Async single embed functions (query path)
+# ---------------------------------------------------------------------------
+
+async def _openai_embed_single(text: str, model: str) -> list[float]:
+    client = get_async_openai_client()
+    response = await client.embeddings.create(model=model, input=[text])
+    return response.data[0].embedding
+
+
+async def _voyage_embed_single(text: str, model: str) -> list[float]:
+    client = _get_async_voyage_client()
+    result = await client.embed([text], model=model, input_type="query")
+    return result.embeddings[0]
+
+
+async def _gemini_embed_single(text: str, model: str) -> list[float]:
+    client = _get_gemini_client()
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(
+        None, lambda: client.models.embed_content(model=model, contents=[text])
+    )
+    return result.embeddings[0].values
+
+
+async def _cohere_embed_single(text: str, model: str) -> list[float]:
+    client = _get_async_cohere_client()
+    result = await client.embed(
+        texts=[text],
+        model=model,
+        input_type="search_query",
+        embedding_types=["float"],
+    )
+    return result.embeddings.float_[0]
+
+
+_ASYNC_DISPATCH = {
+    "openai": _openai_embed_single,
+    "voyage": _voyage_embed_single,
+    "gemini": _gemini_embed_single,
+    "cohere": _cohere_embed_single,
+}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 _embed_cache: dict[tuple[str, str], list[float]] = {}
 _EMBED_CACHE_MAX = 128
 
 
+def _resolve_model(model: str | None) -> tuple[str, str]:
+    """Return (resolved_model_name, provider). Defaults to settings."""
+    from app.embedding_registry import get_model_info
+    settings = get_settings()
+    resolved = model or settings.EMBEDDING_MODEL
+    try:
+        info = get_model_info(resolved)
+        return resolved, info.provider
+    except KeyError:
+        logger.warning("Unknown embedding model '%s', falling back to OpenAI provider", resolved)
+        return resolved, "openai"
+
+
 async def embed_query(text: str, model: str | None = None) -> list[float]:
     """Embed a single query string with in-memory cache."""
-    settings = get_settings()
-    resolved_model = model or settings.EMBEDDING_MODEL
+    resolved_model, provider = _resolve_model(model)
     cache_key = (resolved_model, text)
 
     if cache_key in _embed_cache:
         return _embed_cache[cache_key]
 
-    client = get_async_openai_client()
     encoder = _encoder_for_model(resolved_model)
+    settings = get_settings()
     truncated = _truncate_to_tokens(text, settings.MAX_CHUNK_TOKENS, encoder)
 
-    response = await client.embeddings.create(
-        model=resolved_model,
-        input=[truncated],
-    )
-    embedding = response.data[0].embedding
+    embed_fn = _ASYNC_DISPATCH[provider]
+    embedding = await embed_fn(truncated, resolved_model)
 
-    # Evict oldest if full
     if len(_embed_cache) >= _EMBED_CACHE_MAX:
         oldest = next(iter(_embed_cache))
         del _embed_cache[oldest]
@@ -84,29 +264,16 @@ async def embed_query(text: str, model: str | None = None) -> list[float]:
     return embedding
 
 
-# --- Sync batch path (used by ingestion scripts) ---
-
 def embed_texts(texts: list[str], model: str | None = None) -> list[list[float]]:
-    """Embed a list of texts using OpenAI's embedding API. Handles batching and truncation."""
+    """Embed a list of texts. Handles batching, truncation, and provider dispatch."""
+    resolved_model, provider = _resolve_model(model)
     settings = get_settings()
-    client = get_openai_client()
-    resolved_model = model or settings.EMBEDDING_MODEL
-    max_tokens = settings.MAX_CHUNK_TOKENS
     encoder = _encoder_for_model(resolved_model)
 
-    # Pre-truncate all texts
-    truncated = [_truncate_to_tokens(t, max_tokens, encoder) for t in texts]
+    truncated = _maybe_truncate(texts, settings.MAX_CHUNK_TOKENS, encoder)
 
-    all_embeddings = []
-    for i in range(0, len(truncated), BATCH_SIZE):
-        batch = truncated[i:i + BATCH_SIZE]
-        response = client.embeddings.create(
-            model=resolved_model,
-            input=batch,
-        )
-        # Sort by index to maintain order
-        sorted_data = sorted(response.data, key=lambda x: x.index)
-        all_embeddings.extend([d.embedding for d in sorted_data])
+    embed_fn = _SYNC_DISPATCH[provider]
+    all_embeddings = embed_fn(truncated, resolved_model)
 
     if len(all_embeddings) != len(texts):
         raise RuntimeError(

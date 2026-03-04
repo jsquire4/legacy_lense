@@ -542,6 +542,29 @@
             <div class="eval-rows" id="e2e-rows"></div>
         </div>
 
+        <!-- Ingestion Benchmarking -->
+        <div class="panel">
+            <h2 class="panel-title">Ingestion Benchmarking</h2>
+            <div class="eval-controls">
+                <select id="ingest-model-select" class="model-select"><option value="">Loading...</option></select>
+                <button id="ingest-btn" onclick="runIngest()">Run Ingest</button>
+                <span class="eval-status" id="ingest-status"></span>
+            </div>
+            <div class="eval-metrics" id="ingest-metrics" style="display:none">
+                <div class="obs-stats">
+                    <div class="stat"><span class="stat-value" id="ingest-chunks">—</span><span>Chunks</span></div>
+                    <div class="stat"><span class="stat-value" id="ingest-progress">—</span><span>Progress</span></div>
+                    <div class="stat"><span class="stat-value" id="ingest-elapsed">—</span><span>Elapsed</span></div>
+                </div>
+            </div>
+            <div class="trial-scroll">
+                <table class="trial-table" id="ingest-trials-table">
+                    <thead><tr><th>Embedding Model</th><th>Dimensions</th><th>Time</th><th>Chunks</th><th>Files</th><th>Chunks/sec</th><th></th></tr></thead>
+                    <tbody id="ingest-trials-body"><tr><td colspan="7" style="color:#555">No ingestion trials yet</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- E2E Trial History -->
         <div class="panel">
             <h2 class="panel-title">E2E Trial History <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
@@ -1075,10 +1098,10 @@
             const btn = document.getElementById(btnId);
             const statusEl = document.getElementById(statusId);
             const metricsDiv = document.getElementById(metricsId);
-            const rowsDiv = document.getElementById(rowsId);
+            const rowsDiv = rowsId ? document.getElementById(rowsId) : null;
 
             btn.disabled = true; statusEl.textContent = "Running...";
-            metricsDiv.style.display = "block"; rowsDiv.innerHTML = "";
+            metricsDiv.style.display = "block"; if (rowsDiv) rowsDiv.innerHTML = "";
 
             let summaryData = null, hadError = false;
             try {
@@ -1194,15 +1217,17 @@
                 const res = await fetch("/api/embedding-models");
                 const data = await res.json();
                 embeddingModelsData = data.models || [];
-                const select = document.getElementById("ret-model-select");
-                select.innerHTML = "";
-                embeddingModelsData.forEach(m => {
-                    const opt = document.createElement("option");
-                    opt.value = m.name;
-                    opt.textContent = `${m.name} (${m.dimensions}d)`;
-                    if (m.name === "text-embedding-3-small") opt.selected = true;
-                    select.appendChild(opt);
-                });
+                for (const selId of ["ret-model-select", "ingest-model-select"]) {
+                    const select = document.getElementById(selId);
+                    select.innerHTML = "";
+                    embeddingModelsData.forEach(m => {
+                        const opt = document.createElement("option");
+                        opt.value = m.name;
+                        opt.textContent = `${m.name} (${m.dimensions}d)`;
+                        if (m.name === "text-embedding-3-small") opt.selected = true;
+                        select.appendChild(opt);
+                    });
+                }
             } catch (e) { console.error("Failed to load embedding models", e); }
         }
 
@@ -1306,6 +1331,7 @@
                 if (!res.ok) throw new Error(`Save failed: ${res.status}`);
                 await loadTrials();
                 await loadRetrievalTrials();
+                await loadIngestionTrials();
             } catch (e) {
                 console.error("Failed to autosave trial", e);
             }
@@ -1386,13 +1412,102 @@
             await fetch(`/api/trials/${id}`, { method: "DELETE" });
             await loadTrials();
             await loadRetrievalTrials();
+            await loadIngestionTrials();
+        }
+
+        // --- Ingestion benchmarking ---
+        async function runIngest() {
+            const chunksEl = document.getElementById("ingest-chunks");
+            const progressEl = document.getElementById("ingest-progress");
+            const elapsedEl = document.getElementById("ingest-elapsed");
+            chunksEl.textContent = "—"; progressEl.textContent = "—"; elapsedEl.textContent = "—";
+
+            const ingestModel = document.getElementById("ingest-model-select").value;
+            if (!ingestModel) return;
+            const url = `/api/ingest/stream?embedding_model=${encodeURIComponent(ingestModel)}`;
+
+            const embInfo = embeddingModelsData.find(m => m.name === ingestModel) || {};
+
+            await runEvalStream({
+                btnId: "ingest-btn", statusId: "ingest-status", metricsId: "ingest-metrics", rowsId: null, url,
+                onProgress(data) {
+                    if (data.phase === "parsing") {
+                        chunksEl.textContent = data.chunks;
+                        progressEl.textContent = `${data.files} files → ${data.units} units`;
+                    } else if (data.phase === "embedding") {
+                        progressEl.textContent = `${data.completed} / ${data.total}`;
+                        elapsedEl.textContent = data.elapsed_sec + "s";
+                    }
+                },
+                onSummary(data, statusEl) {
+                    chunksEl.textContent = data.chunks_ingested;
+                    progressEl.textContent = `${data.chunks_ingested} / ${data.chunks_ingested}`;
+                    elapsedEl.textContent = data.ingestion_time_sec + "s";
+                    statusEl.textContent = `Done — ${data.chunks_per_sec} chunks/sec`;
+                },
+                onFinish(s) {
+                    autoSaveTrial({
+                        model: ingestModel,
+                        eval_type: "ingestion",
+                        embedding_model: ingestModel,
+                        embedding_dimensions: embInfo.dimensions || s.dimensions,
+                        ingestion_time_sec: s.ingestion_time_sec,
+                        chunks_ingested: s.chunks_ingested,
+                        files_processed: s.files_processed,
+                    });
+                },
+            });
+        }
+
+        async function loadIngestionTrials() {
+            const tbody = document.getElementById("ingest-trials-body");
+            let trials = [];
+            try {
+                const res = await fetch("/api/trials?eval_type=ingestion");
+                const data = await res.json();
+                trials = data.trials || [];
+            } catch (e) {
+                console.error("Failed to fetch ingestion trials", e);
+            }
+            if (!trials.length) {
+                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">No ingestion trials yet</td></tr>';
+                return;
+            }
+            // Find best values
+            const times = trials.map(t => t.ingestion_time_sec).filter(v => v != null);
+            const speeds = trials.map(t => t.ingestion_time_sec && t.chunks_ingested ? t.chunks_ingested / t.ingestion_time_sec : null).filter(v => v != null);
+            const bestTime = Math.min(...times, Infinity);
+            const bestSpeed = Math.max(...speeds, -Infinity);
+            const dash = '<span class="trial-no-data">--</span>';
+
+            tbody.innerHTML = "";
+            for (const t of trials) {
+                const tr = document.createElement("tr");
+                const embName = t.embedding_model || t.model || "--";
+                const dims = t.embedding_dimensions || "--";
+                const timeSec = t.ingestion_time_sec;
+                const chunks = t.chunks_ingested;
+                const files = t.files_processed;
+                const cps = timeSec && chunks ? (chunks / timeSec).toFixed(1) : null;
+                const isBestTime = timeSec != null && timeSec === bestTime;
+                const isBestSpeed = cps != null && parseFloat(cps) === Math.round(bestSpeed * 10) / 10;
+                tr.innerHTML =
+                    `<td class="trial-model">${embName}</td>` +
+                    `<td>${dims}</td>` +
+                    `<td${isBestTime ? ' class="trial-best"' : ''}>${timeSec != null ? timeSec.toFixed(1) + "s" : dash}</td>` +
+                    `<td>${chunks != null ? chunks : dash}</td>` +
+                    `<td>${files != null ? files : dash}</td>` +
+                    `<td${isBestSpeed ? ' class="trial-best"' : ''}>${cps != null ? cps : dash}</td>` +
+                    `<td><button class="trial-delete" onclick="deleteTrial(${t.id})">&#10005;</button></td>`;
+                tbody.appendChild(tr);
+            }
         }
 
         // Init — models must load before trials so the table can render all models
         async function init() {
             if (retRunCount > 0) updateRetSummary();
             await Promise.all([loadModels(), loadEmbeddingModels()]);
-            await Promise.all([loadTrials(), loadRetrievalTrials()]);
+            await Promise.all([loadTrials(), loadRetrievalTrials(), loadIngestionTrials()]);
         }
         init();
     </script>

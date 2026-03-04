@@ -472,6 +472,45 @@ def test_eval_stream_with_model_param(mock_retrieve):
     assert any(e["event"] == "summary" for e in events)
 
 
+@patch("app.main.ingest_stream_generator")
+def test_ingest_stream_returns_sse(mock_gen):
+    """Ingest stream endpoint returns SSE response."""
+    from app.sse import sse_event
+    async def fake_gen(embedding_model):
+        yield sse_event("progress", {"phase": "parsing", "files": 1, "units": 1, "chunks": 1})
+        yield sse_event("summary", {"embedding_model": "text-embedding-3-small", "dimensions": 1536, "files_processed": 1, "chunks_ingested": 1, "ingestion_time_sec": 1.0, "chunks_per_sec": 1.0})
+    mock_gen.side_effect = fake_gen
+    response = client.get("/api/ingest/stream?embedding_model=text-embedding-3-small")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    events = _parse_sse_events(response.text)
+    event_types = [e["event"] for e in events]
+    assert "progress" in event_types
+    assert "summary" in event_types
+    summary = [e for e in events if e["event"] == "summary"][0]["data"]
+    assert summary["embedding_model"] == "text-embedding-3-small"
+
+
+@patch("app.main.save_trial")
+def test_create_ingestion_trial_endpoint(mock_save):
+    mock_save.return_value = 1
+    response = client.post("/api/trials", json={
+        "model": "text-embedding-3-small",
+        "eval_type": "ingestion",
+        "embedding_model": "text-embedding-3-small",
+        "embedding_dimensions": 1536,
+        "ingestion_time_sec": 45.2,
+        "chunks_ingested": 2407,
+        "files_processed": 2300,
+    })
+    assert response.status_code == 200
+    assert response.json() == {"id": 1}
+    call_data = mock_save.call_args[0][0]
+    assert call_data["ingestion_time_sec"] == 45.2
+    assert call_data["chunks_ingested"] == 2407
+    assert call_data["files_processed"] == 2300
+
+
 @patch("app.main._build_response", new_callable=AsyncMock)
 @pytest.mark.asyncio
 async def test_warm_cache_success(mock_build):

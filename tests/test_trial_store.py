@@ -85,3 +85,25 @@ def test_save_trial_defaults():
 def test_list_trials_empty():
     db = _tmp_db()
     assert list_trials(db_path=db) == []
+
+
+def test_save_ingestion_trial():
+    db = _tmp_db()
+    save_trial({
+        "model": "text-embedding-3-small",
+        "eval_type": "ingestion",
+        "embedding_model": "text-embedding-3-small",
+        "embedding_dimensions": 1536,
+        "ingestion_time_sec": 45.2,
+        "chunks_ingested": 2407,
+        "files_processed": 2300,
+    }, db_path=db)
+    trials = list_trials(db_path=db)
+    assert len(trials) == 1
+    t = trials[0]
+    assert t["eval_type"] == "ingestion"
+    assert t["ingestion_time_sec"] == 45.2
+    assert t["chunks_ingested"] == 2407
+    assert t["files_processed"] == 2300
+    assert t["embedding_model"] == "text-embedding-3-small"
+    assert t["embedding_dimensions"] == 1536

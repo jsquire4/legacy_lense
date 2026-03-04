@@ -74,4 +74,7 @@ class TrialRequest(BaseModel):
     total_queries: int | None = None
     embedding_model: str | None = None
     embedding_dimensions: int | None = None
+    ingestion_time_sec: float | None = None
+    chunks_ingested: int | None = None
+    files_processed: int | None = None
     notes: str = ""

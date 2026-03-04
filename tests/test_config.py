@@ -16,6 +16,9 @@ def test_get_settings_returns_settings_instance(monkeypatch):
         settings = get_settings()
         assert isinstance(settings, Settings)
         assert settings.OPENAI_API_KEY == "test-key"
+        assert settings.VOYAGE_API_KEY == ""
+        assert settings.GEMINI_API_KEY == ""
+        assert settings.COHERE_API_KEY == ""
         assert settings.QDRANT_URL == "http://localhost:6333"
         assert settings.QDRANT_COLLECTION_NAME == "lapack-text-embedding-3-small"
         assert settings.EMBEDDING_MODEL == "text-embedding-3-small"

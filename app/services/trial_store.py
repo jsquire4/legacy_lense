@@ -36,6 +36,9 @@ _MIGRATIONS = [
     ("avg_precision_at_5", "ALTER TABLE trials ADD COLUMN avg_precision_at_5 REAL"),
     ("embedding_model", "ALTER TABLE trials ADD COLUMN embedding_model TEXT"),
     ("embedding_dimensions", "ALTER TABLE trials ADD COLUMN embedding_dimensions INTEGER"),
+    ("ingestion_time_sec", "ALTER TABLE trials ADD COLUMN ingestion_time_sec REAL"),
+    ("chunks_ingested", "ALTER TABLE trials ADD COLUMN chunks_ingested INTEGER"),
+    ("files_processed", "ALTER TABLE trials ADD COLUMN files_processed INTEGER"),
 ]
 
 
@@ -63,8 +66,9 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
             """INSERT INTO trials
                (created_at, model, eval_type, avg_recall_at_5, avg_precision_at_5, pass_rate,
                 avg_retrieval_latency_ms, avg_e2e_latency_ms, total_queries,
-                input_cost_per_1m, output_cost_per_1m, embedding_model, embedding_dimensions, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                input_cost_per_1m, output_cost_per_1m, embedding_model, embedding_dimensions,
+                ingestion_time_sec, chunks_ingested, files_processed, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("created_at", datetime.now(timezone.utc).isoformat()),
                 data["model"],
@@ -79,6 +83,9 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
                 data.get("output_cost_per_1m"),
                 data.get("embedding_model"),
                 data.get("embedding_dimensions"),
+                data.get("ingestion_time_sec"),
+                data.get("chunks_ingested"),
+                data.get("files_processed"),
                 data.get("notes", ""),
             ),
         )

@@ -8,6 +8,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
+COPY fixtures/ fixtures/
 
 RUN adduser --disabled-password --gecos '' appuser \
     && mkdir -p /app/logs /app/data && chown appuser:appuser /app/logs /app/data

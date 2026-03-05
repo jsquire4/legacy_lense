@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import get_settings
 from app.services.parser import parse_file
 from app.services.chunker import chunk_units
+from app.services.chunk_loader import load_chunks_from_fixture, DEFAULT_FIXTURE_PATH
 from app.services.embeddings import embed_texts
 from app.services.vector_store import ensure_collection, upsert_chunks, delete_collection
 from app.embedding_registry import EMBEDDING_MODELS, collection_name_for_model, get_model_info
@@ -57,6 +58,8 @@ def main():
                         help="Qdrant collection name override")
     parser.add_argument("--recreate", action="store_true",
                         help="Delete target collection before ingesting")
+    parser.add_argument("--from-source", action="store_true",
+                        help="Force re-parse from Fortran source files instead of using fixture")
     parser.add_argument("--list-models", action="store_true",
                         help="List all registered embedding models and exit")
     args = parser.parse_args()
@@ -82,58 +85,68 @@ def main():
         if embedding_model:
             logger.warning("Unknown embedding model '%s', using settings default", embedding_model)
 
-    data_dir = Path(args.data_dir)
-    if not data_dir.exists():
-        logger.error("Data directory not found: %s", data_dir)
-        sys.exit(1)
-
     start_time = time.time()
 
-    # Collect files from specified subdirectories
-    all_files = []
-    for subdir in args.subdirs:
-        subdir_path = data_dir / subdir
-        if subdir_path.exists():
-            files = find_fortran_files(subdir_path, args.extensions)
-            all_files.extend(files)
-            logger.info("Found %d files in %s", len(files), subdir_path)
-        else:
-            logger.warning("Subdirectory not found: %s", subdir_path)
+    use_fixture = not args.from_source and DEFAULT_FIXTURE_PATH.exists()
 
-    logger.info("Total files to process: %d", len(all_files))
+    if use_fixture:
+        # Load pre-parsed chunks from fixture (fast path)
+        logger.info("Loading chunks from fixture: %s", DEFAULT_FIXTURE_PATH)
+        all_chunks = load_chunks_from_fixture()
+    else:
+        if not args.from_source and not DEFAULT_FIXTURE_PATH.exists():
+            logger.warning("Fixture not found at %s — falling back to source parsing", DEFAULT_FIXTURE_PATH)
 
-    # Parse all files
-    all_units = []
-    parse_errors = 0
-    for i, file_path in enumerate(all_files):
-        try:
-            units = parse_file(file_path)
-            all_units.extend(units)
-            if (i + 1) % 100 == 0:
-                logger.info("Parsed %d/%d files (%d units so far)",
-                            i + 1, len(all_files), len(all_units))
-        except Exception as e:
-            parse_errors += 1
-            logger.error("Failed to parse %s: %s", file_path, e)
+        data_dir = Path(args.data_dir)
+        if not data_dir.exists():
+            logger.error("Data directory not found: %s", data_dir)
+            sys.exit(1)
 
-    logger.info("Parsing complete: %d units from %d files (%d errors)",
-                len(all_units), len(all_files), parse_errors)
+        # Collect files from specified subdirectories
+        all_files = []
+        for subdir in args.subdirs:
+            subdir_path = data_dir / subdir
+            if subdir_path.exists():
+                files = find_fortran_files(subdir_path, args.extensions)
+                all_files.extend(files)
+                logger.info("Found %d files in %s", len(files), subdir_path)
+            else:
+                logger.warning("Subdirectory not found: %s", subdir_path)
 
-    # Build reverse call-graph (called_by_map)
-    called_by_map: dict[str, list[str]] = {}
-    for unit in all_units:
-        for called in unit.called_routines:
-            called_by_map.setdefault(called, []).append(unit.name)
-    logger.info("Built reverse call-graph: %d routines have callers", len(called_by_map))
+        logger.info("Total files to process: %d", len(all_files))
 
-    # Chunk all units
-    all_chunks = chunk_units(all_units, called_by_map=called_by_map)
-    logger.info("Chunking complete: %d chunks", len(all_chunks))
+        # Parse all files
+        all_units = []
+        parse_errors = 0
+        for i, file_path in enumerate(all_files):
+            try:
+                units = parse_file(file_path)
+                all_units.extend(units)
+                if (i + 1) % 100 == 0:
+                    logger.info("Parsed %d/%d files (%d units so far)",
+                                i + 1, len(all_files), len(all_units))
+            except Exception as e:
+                parse_errors += 1
+                logger.error("Failed to parse %s: %s", file_path, e)
+
+        logger.info("Parsing complete: %d units from %d files (%d errors)",
+                    len(all_units), len(all_files), parse_errors)
+
+        # Build reverse call-graph (called_by_map)
+        called_by_map: dict[str, list[str]] = {}
+        for unit in all_units:
+            for called in unit.called_routines:
+                called_by_map.setdefault(called, []).append(unit.name)
+        logger.info("Built reverse call-graph: %d routines have callers", len(called_by_map))
+
+        # Chunk all units
+        all_chunks = chunk_units(all_units, called_by_map=called_by_map)
+        logger.info("Chunking complete: %d chunks", len(all_chunks))
 
     if args.dry_run:
         logger.info("DRY RUN — skipping embedding and upsert")
-        logger.info("Summary: %d files → %d units → %d chunks",
-                    len(all_files), len(all_units), len(all_chunks))
+        source = "fixture" if use_fixture else "source"
+        logger.info("Source: %s | Chunks: %d", source, len(all_chunks))
         # Print sample
         if all_chunks:
             sample = all_chunks[0]

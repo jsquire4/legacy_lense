@@ -10,6 +10,13 @@ from app.services.ingest_runner import ingest_stream_generator, _find_fortran_fi
 from tests.helpers import collect_sse_events
 
 
+def _patch_no_fixture():
+    """Patch DEFAULT_FIXTURE_PATH.exists() to return False, forcing source-parsing path."""
+    mock_path = MagicMock(spec=Path)
+    mock_path.exists.return_value = False
+    return patch("app.services.ingest_runner.DEFAULT_FIXTURE_PATH", mock_path)
+
+
 @pytest.mark.asyncio
 async def test_unknown_model_emits_error():
     events = await collect_sse_events(ingest_stream_generator("nonexistent-model"))
@@ -72,7 +79,7 @@ async def test_successful_ingestion_emits_correct_events(
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=True):
+    with patch.object(Path, "exists", return_value=True), _patch_no_fixture():
         mock_find.return_value = [Path("/tmp/fake_data/SRC/dgesv.f")]
 
         mock_unit = MagicMock()
@@ -98,6 +105,7 @@ async def test_successful_ingestion_emits_correct_events(
     # Check parsing progress event
     parse_events = [e for e in events if e["event"] == "progress" and e["data"].get("phase") == "parsing"]
     assert len(parse_events) == 1
+    assert parse_events[0]["data"]["source"] == "files"
     assert parse_events[0]["data"]["files"] == 1
     assert parse_events[0]["data"]["files_parsed"] == 1
     assert parse_events[0]["data"]["parse_errors"] == 0
@@ -138,7 +146,7 @@ async def test_missing_data_dir_emits_error(mock_settings, mock_find):
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=False):
+    with patch.object(Path, "exists", return_value=False), _patch_no_fixture():
         events = await collect_sse_events(
             ingest_stream_generator("text-embedding-3-small")
         )
@@ -157,7 +165,7 @@ async def test_no_files_found_emits_error(mock_settings, mock_find):
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=True):
+    with patch.object(Path, "exists", return_value=True), _patch_no_fixture():
         mock_find.return_value = []
         events = await collect_sse_events(
             ingest_stream_generator("text-embedding-3-small")
@@ -189,7 +197,7 @@ async def test_ingest_rate_limit_retry_emits_progress(
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=True):
+    with patch.object(Path, "exists", return_value=True), _patch_no_fixture():
         mock_find.return_value = [Path("/tmp/fake_data/SRC/dgesv.f")]
 
         mock_unit = MagicMock()
@@ -237,7 +245,7 @@ async def test_ingest_embed_error(
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=True):
+    with patch.object(Path, "exists", return_value=True), _patch_no_fixture():
         mock_find.return_value = [Path("/tmp/fake_data/SRC/dgesv.f")]
 
         mock_unit = MagicMock()
@@ -276,7 +284,7 @@ async def test_ingest_parse_error_partial_success(
     mock_settings.return_value = settings
 
     from pathlib import Path
-    with patch.object(Path, "exists", return_value=True):
+    with patch.object(Path, "exists", return_value=True), _patch_no_fixture():
         file1 = Path("/tmp/fake_data/SRC/bad.f")
         file2 = Path("/tmp/fake_data/SRC/good.f")
         mock_find.return_value = [file1, file2]

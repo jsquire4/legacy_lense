@@ -22,5 +22,8 @@ build/
 # Data
 data/
 logs/
+
+# Fixtures (committed — pre-parsed chunks for fast ingestion)
+!fixtures/
 PLAN.md
 .gitnexus

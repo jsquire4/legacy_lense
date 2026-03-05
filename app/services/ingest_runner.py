@@ -8,6 +8,7 @@ from pathlib import Path
 from app.embedding_registry import EMBEDDING_MODELS, collection_name_for_model, get_model_info
 from app.services.parser import parse_file
 from app.services.chunker import chunk_units
+from app.services.chunk_loader import load_chunks_from_fixture, DEFAULT_FIXTURE_PATH
 from app.services.embeddings import embed_texts
 from app.services.vector_store import ensure_collection, upsert_chunks, delete_collection
 from app.config import get_settings
@@ -52,55 +53,67 @@ async def ingest_stream_generator(embedding_model: str):
 
     async with _ingest_lock:
         settings = get_settings()
-        data_dir = Path(settings.DATA_DIR)
-
-        if not data_dir.exists():
-            yield _sse_event("error", {"message": f"Data directory not found: {data_dir}"})
-            return
-
         model_info = get_model_info(embedding_model)
         target_collection = collection_name_for_model("lapack", embedding_model)
 
         t0 = time.time()
 
-        # Phase 1: Parse files
-        all_files = await asyncio.to_thread(
-            _find_fortran_files, data_dir, _DEFAULT_EXTENSIONS, _DEFAULT_SUBDIRS
-        )
-        if not all_files:
-            yield _sse_event("error", {"message": f"No Fortran files found in {data_dir}"})
-            return
+        # Phase 1: Load chunks (fixture or parse from source)
+        use_fixture = DEFAULT_FIXTURE_PATH.exists()
 
-        all_units = []
-        parse_errors = 0
-        for file_path in all_files:
-            try:
-                units = await asyncio.to_thread(parse_file, file_path)
-                all_units.extend(units)
-            except Exception as e:
-                parse_errors += 1
-                logger.warning("Failed to parse %s: %s", file_path, e)
+        if use_fixture:
+            all_chunks = await asyncio.to_thread(load_chunks_from_fixture)
+            yield _sse_event("progress", {
+                "phase": "parsing",
+                "source": "fixture",
+                "chunks": len(all_chunks),
+            })
+        else:
+            logger.warning("Fixture not found at %s — falling back to source parsing", DEFAULT_FIXTURE_PATH)
+            data_dir = Path(settings.DATA_DIR)
 
-        # Build reverse call-graph
-        called_by_map: dict[str, list[str]] = {}
-        for unit in all_units:
-            for called in unit.called_routines:
-                called_by_map.setdefault(called, []).append(unit.name)
+            if not data_dir.exists():
+                yield _sse_event("error", {"message": f"Data directory not found: {data_dir}"})
+                return
 
-        all_chunks = await asyncio.to_thread(chunk_units, all_units, called_by_map=called_by_map)
+            all_files = await asyncio.to_thread(
+                _find_fortran_files, data_dir, _DEFAULT_EXTENSIONS, _DEFAULT_SUBDIRS
+            )
+            if not all_files:
+                yield _sse_event("error", {"message": f"No Fortran files found in {data_dir}"})
+                return
 
-        files_parsed = len(all_files) - parse_errors
-        coverage_pct = round(100.0 * files_parsed / len(all_files), 1) if all_files else 0.0
+            all_units = []
+            parse_errors = 0
+            for file_path in all_files:
+                try:
+                    units = await asyncio.to_thread(parse_file, file_path)
+                    all_units.extend(units)
+                except Exception as e:
+                    parse_errors += 1
+                    logger.warning("Failed to parse %s: %s", file_path, e)
 
-        yield _sse_event("progress", {
-            "phase": "parsing",
-            "files": len(all_files),
-            "files_parsed": files_parsed,
-            "parse_errors": parse_errors,
-            "units": len(all_units),
-            "chunks": len(all_chunks),
-            "coverage_pct": coverage_pct,
-        })
+            # Build reverse call-graph
+            called_by_map: dict[str, list[str]] = {}
+            for unit in all_units:
+                for called in unit.called_routines:
+                    called_by_map.setdefault(called, []).append(unit.name)
+
+            all_chunks = await asyncio.to_thread(chunk_units, all_units, called_by_map=called_by_map)
+
+            files_parsed = len(all_files) - parse_errors
+            coverage_pct = round(100.0 * files_parsed / len(all_files), 1) if all_files else 0.0
+
+            yield _sse_event("progress", {
+                "phase": "parsing",
+                "source": "files",
+                "files": len(all_files),
+                "files_parsed": files_parsed,
+                "parse_errors": parse_errors,
+                "units": len(all_units),
+                "chunks": len(all_chunks),
+                "coverage_pct": coverage_pct,
+            })
 
         # Phase 2: Delete old collection and recreate
         await asyncio.to_thread(delete_collection, target_collection)
@@ -156,14 +169,22 @@ async def ingest_stream_generator(embedding_model: str):
         elapsed = time.time() - t0
         chunks_per_sec = total_upserted / elapsed if elapsed > 0 else 0
 
-        yield _sse_event("summary", {
+        summary_data = {
             "embedding_model": embedding_model,
             "dimensions": model_info.dimensions,
-            "files_processed": len(all_files),
-            "files_parsed": files_parsed,
-            "parse_errors": parse_errors,
-            "coverage_pct": coverage_pct,
             "chunks_ingested": total_upserted,
             "ingestion_time_sec": round(elapsed, 2),
             "chunks_per_sec": round(chunks_per_sec, 1),
-        })
+        }
+        if use_fixture:
+            summary_data["source"] = "fixture"
+        else:
+            summary_data.update({
+                "source": "files",
+                "files_processed": len(all_files),
+                "files_parsed": files_parsed,
+                "parse_errors": parse_errors,
+                "coverage_pct": coverage_pct,
+            })
+
+        yield _sse_event("summary", summary_data)

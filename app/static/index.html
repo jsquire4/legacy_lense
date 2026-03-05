@@ -1546,10 +1546,6 @@
             localStorage.setItem("retAvgLatency", JSON.stringify(retAvgLatency));
             localStorage.setItem("retAvgRecall", JSON.stringify(retAvgRecall));
             localStorage.setItem("retRunCount", JSON.stringify(retRunCount));
-            const el = document.getElementById("ret-summary");
-            const recall = retAvgRecall != null ? retAvgRecall.toFixed(3) : "--";
-            const lat = retAvgLatency != null ? fmtSec(retAvgLatency) : "--";
-            el.innerHTML = `— R@5 <strong style="color:#e0e0e0">${recall}</strong>, Latency <strong style="color:#e0e0e0">${lat}</strong>, ${retRunCount} run${retRunCount !== 1 ? "s" : ""}`;
         }
 
         async function loadRetrievalTrials() {

@@ -466,7 +466,7 @@
         .arch-section p { color: #8b949e; font-size: 0.88rem; line-height: 1.55; }
         .pipeline {
             display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            grid-template-columns: repeat(7, 1fr);
             gap: 0.25rem;
             margin: 1rem 0; padding: 0.75rem; background: #1e1e1e;
             border: 1px solid #3e3e3e; border-radius: 6px;
@@ -667,54 +667,51 @@
             <h2 class="panel-title">Architecture</h2>
             <div class="arch-section">
                 <h3>RAG Pipeline</h3>
-                <p>LegacyLens uses a hybrid retrieval-augmented generation pipeline to answer natural language queries about the LAPACK Fortran codebase.</p>
+                <p>LegacyLens uses a multi-strategy retrieval-augmented generation pipeline with swappable embedding and LLM providers to answer natural language queries about the LAPACK Fortran codebase.</p>
                 <div class="pipeline">
-                    <div class="pipeline-step"><div class="step-title">Query</div><div class="step-tech">User NL input</div></div>
+                    <div class="pipeline-step"><div class="step-title">Query</div><div class="step-tech">User NL input + capability selection</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Embed</div><div class="step-tech">text-embedding-3-small</div></div>
+                    <div class="pipeline-step"><div class="step-title">Expand</div><div class="step-tech">LLM identifies 5-8 routine names</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Hybrid Search</div><div class="step-tech">Vector + Name match</div></div>
+                    <div class="pipeline-step"><div class="step-title">Embed</div><div class="step-tech">Multi-provider (OpenAI, Voyage, Gemini, Cohere)</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Context</div><div class="step-tech">6K token budget</div></div>
+                    <div class="pipeline-step"><div class="step-title">Hybrid Search</div><div class="step-tech">Name match + call-graph + vector</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Generate</div><div class="step-tech">OpenAI Models</div></div>
+                    <div class="pipeline-step"><div class="step-title">Context</div><div class="step-tech">3K token budget</div></div>
                     <span class="pipeline-arrow">&#8594;</span>
-                    <div class="pipeline-step"><div class="step-title">Response</div><div class="step-tech">Citations enforced</div></div>
+                    <div class="pipeline-step"><div class="step-title">Generate</div><div class="step-tech">OpenAI or Gemini LLMs</div></div>
+                    <span class="pipeline-arrow">&#8594;</span>
+                    <div class="pipeline-step"><div class="step-title">Response</div><div class="step-tech">7 capability prompts, citations enforced</div></div>
                 </div>
             </div>
             <div class="arch-section">
-                <h3>Key Stats</h3>
-                <ul class="component-list">
-                    <li><strong>Fortran files indexed:</strong> <span>2,272</span></li>
-                    <li><strong>Chunks stored:</strong> <span>2,334</span></li>
-                </ul>
-            </div>
-            <div class="arch-section">
                 <h3>Retrieval Strategy</h3>
-                <p>Three-pronged hybrid retrieval merges results from multiple strategies:</p>
+                <p>Five-pronged hybrid retrieval runs strategies in parallel, merging and deduplicating results:</p>
                 <ul class="component-list">
-                    <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter.</span></li>
-                    <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names, each searched individually.</span></li>
-                    <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: routines called by name-matched results are also retrieved, surfacing implementation dependencies.</span></li>
-                    <li><strong>Vector similarity</strong> &mdash; <span>Standard cosine similarity search fills remaining top-k slots, ensuring broad coverage.</span></li>
+                    <li><strong>Name matching</strong> &mdash; <span>Regex detects LAPACK routine names (e.g., DGESV) in the query and fetches exact matches via Qdrant payload filter (top-3).</span></li>
+                    <li><strong>LLM query expansion</strong> &mdash; <span>For conceptual queries ("How does SVD work?"), the LLM identifies 5-8 relevant routine names (cached, 256-entry LRU), each searched individually.</span></li>
+                    <li><strong>Call-graph following</strong> &mdash; <span>One-hop expansion: follows <code>called_routines</code> metadata from name-matched results to surface implementation dependencies.</span></li>
+                    <li><strong>Caller impact analysis</strong> &mdash; <span>Reverse lookup: finds routines that call a target via <code>called_by</code> metadata filter (top-5), used by impact analysis capability.</span></li>
+                    <li><strong>Vector similarity</strong> &mdash; <span>Cosine similarity search fills remaining top-k slots, ensuring broad semantic coverage.</span></li>
                 </ul>
             </div>
             <div class="arch-section">
                 <h3>Components</h3>
                 <ul class="component-list">
-                    <li><strong>FastAPI</strong> &mdash; <span>Web server serving the UI and REST API</span></li>
-                    <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing (fixed-form .f + free-form .f90) with RAW fallback</span></li>
-                    <li><strong>OpenAI</strong> &mdash; <span>text-embedding-3-small (1536-dim) for embeddings, GPT-4o-mini for generation</span></li>
-                    <li><strong>Qdrant Cloud</strong> &mdash; <span>Managed vector database with payload indexes for name filtering</span></li>
-                    <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting and context budget enforcement</span></li>
+                    <li><strong>FastAPI + Uvicorn</strong> &mdash; <span>Async web server with SSE streaming for evals and query responses</span></li>
+                    <li><strong>fparser</strong> &mdash; <span>AST-based Fortran parsing &mdash; fparser1 for fixed-form (.f), fparser2 for free-form (.f90), RAW fallback for unparseable files</span></li>
+                    <li><strong>Embeddings (4 providers)</strong> &mdash; <span>OpenAI (1536/3072-dim), Voyage AI (1024-dim), Gemini (3072-dim), Cohere (1536-dim) &mdash; per-collection model selection</span></li>
+                    <li><strong>LLMs (2 providers)</strong> &mdash; <span>OpenAI (GPT-3.5-turbo through GPT-5.2) and Google Gemini (2.5-flash, 2.5-pro) with streaming + TTFT tracking</span></li>
+                    <li><strong>Qdrant</strong> &mdash; <span>Self-hosted vector DB with payload indexes on unit_name, file_path, called_by for hybrid retrieval</span></li>
+                    <li><strong>tiktoken</strong> &mdash; <span>Token counting for chunk splitting (8191-token cap, 50-token overlap) and 3K context budget enforcement</span></li>
                 </ul>
             </div>
             <div class="arch-section">
                 <h3>Deployment</h3>
                 <ul class="component-list">
-                    <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service.</span></li>
-                    <li><strong>Qdrant Cloud</strong> &mdash; <span>External managed vector DB (free tier, 1 GB).</span></li>
+                    <li><strong>Railway</strong> &mdash; <span>Auto-deploys from GitHub on push. Single Dockerfile-based service (Python 3.12-slim, non-root user). Qdrant runs as a separate Railway service.</span></li>
                     <li><strong>Docker Compose</strong> &mdash; <span>Local dev with <code>docker compose up --build</code>.</span></li>
+                    <li><strong>Ingestion</strong> &mdash; <span>Runs locally via CLI (<code>scripts/ingest.py</code>) &mdash; parse, chunk, embed, upsert to Qdrant per collection.</span></li>
                 </ul>
             </div>
         </div>

@@ -33,6 +33,15 @@ def test_root_serves_html():
     assert "LegacyLens" in response.text
 
 
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_endpoint_retrieval_failure_raises(mock_retrieve):
+    """Query endpoint propagates retrieval exception (covers logger.error branch)."""
+    mock_retrieve.side_effect = Exception("Qdrant connection refused")
+    no_raise_client = TestClient(app, raise_server_exceptions=False)
+    response = no_raise_client.post("/api/query", json={"query": "test"})
+    assert response.status_code == 500
+
+
 @patch("app.main.generate_answer", new_callable=AsyncMock)
 @patch("app.main.retrieve", new_callable=AsyncMock)
 def test_query_endpoint(mock_retrieve, mock_generate):
@@ -404,6 +413,58 @@ def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate, mo
     assert len(failed) >= 1
 
 
+@patch("app.services.embeddings.embed_query", new_callable=AsyncMock)
+@patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
+def test_e2e_eval_stream_with_embedding_model(mock_retrieve, mock_generate, mock_embed):
+    """E2E eval passes embedding_model to collection_name_for_model (lines 158-159)."""
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    mock_generate.return_value = make_generate_result(answer="x" * 200, citations=["a.f"])
+    mock_embed.return_value = [1.0] * 1536
+
+    response = client.get("/api/eval/e2e/stream?embedding_model=voyage-code-3")
+    assert response.status_code == 200
+    call_kwargs = mock_retrieve.call_args.kwargs
+    assert call_kwargs.get("embedding_model") == "voyage-code-3"
+
+
+@patch("app.services.embeddings.embed_query", new_callable=AsyncMock)
+@patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
+def test_e2e_eval_stream_generation_failure_emits_progress(mock_retrieve, mock_generate, mock_embed):
+    """E2E eval yields progress with passed=False when generate_answer raises (lines 193-208)."""
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    mock_generate.side_effect = RuntimeError("Model overloaded")
+    mock_embed.return_value = [1.0] * 1536
+
+    response = client.get("/api/eval/e2e/stream")
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    progress_events = [e for e in events if e["event"] == "progress"]
+    assert len(progress_events) >= 1
+    failed = [p for p in progress_events if p["data"].get("checks", {}).get("error")]
+    assert len(failed) >= 1
+    assert "Model overloaded" in failed[0]["data"]["checks"]["error"]
+
+
+@patch("app.services.embeddings.embed_query", new_callable=AsyncMock)
+@patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
+def test_e2e_eval_stream_embedding_similarity_failure(mock_retrieve, mock_generate, mock_embed):
+    """E2E eval continues when embed_query fails for similarity (lines 225-226)."""
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    mock_generate.return_value = make_generate_result(
+        answer="DGESV solves linear systems via LU. DGETRF and DGETRS. " * 10,
+        citations=["dgesv.f:1-50"],
+    )
+    mock_embed.side_effect = Exception("Embedding API down")
+
+    response = client.get("/api/eval/e2e/stream")
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    assert events[-1]["event"] == "summary"
+
+
 # --- Model endpoint tests ---
 
 def test_models_endpoint():
@@ -469,6 +530,21 @@ def test_list_trials_endpoint(mock_list):
     response = client.get("/api/trials")
     assert response.status_code == 200
     assert len(response.json()["trials"]) == 1
+
+
+@patch("app.main.list_trials")
+def test_list_trials_endpoint_with_eval_type_filter(mock_list):
+    """list_trials filters by eval_type when provided."""
+    mock_list.return_value = [
+        {"id": 1, "model": "gpt-4o-mini", "eval_type": "retrieval"},
+        {"id": 2, "model": "gpt-4o-mini", "eval_type": "e2e"},
+        {"id": 3, "model": "gemini-2.5-flash", "eval_type": "retrieval"},
+    ]
+    response = client.get("/api/trials?eval_type=retrieval")
+    assert response.status_code == 200
+    trials = response.json()["trials"]
+    assert len(trials) == 2
+    assert all(t["eval_type"] == "retrieval" for t in trials)
 
 
 @patch("app.main.delete_trial")
@@ -679,6 +755,17 @@ def test_eval_stream_with_model_param(mock_retrieve):
     assert any(e["event"] == "summary" for e in events)
 
 
+@patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
+def test_eval_stream_with_embedding_model_param(mock_retrieve):
+    """Eval stream passes embedding_model to collection_name_for_model (lines 50-51)."""
+    mock_retrieve.return_value = _EVAL_RETRIEVE
+    response = client.get("/api/eval/stream?embedding_model=text-embedding-3-small")
+    assert response.status_code == 200
+    mock_retrieve.assert_called()
+    call_kwargs = mock_retrieve.call_args.kwargs
+    assert call_kwargs.get("embedding_model") == "text-embedding-3-small"
+
+
 @patch("app.main.ingest_stream_generator")
 def test_ingest_stream_returns_sse(mock_gen):
     """Ingest stream endpoint returns SSE response."""
@@ -795,3 +882,40 @@ def test_query_stream_endpoint_retrieve_error(mock_retrieve):
     error_events = [e for e in events if e["event"] == "error"]
     assert len(error_events) >= 1
     assert "Qdrant timeout" in error_events[0]["data"]["message"]
+
+
+@patch("app.main.generate_answer_stream")
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_stream_generation_error_event(mock_retrieve, mock_stream):
+    """Stream yields error when generate_answer_stream yields type=error (lines 291-292)."""
+    mock_retrieve.return_value = make_retrieve_result()
+
+    async def gen_with_error(*args, **kwargs):
+        yield {"type": "error", "message": "Model overloaded"}
+
+    mock_stream.side_effect = gen_with_error
+    response = client.post("/api/query/stream", json={"query": "test"})
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    error_events = [e for e in events if e["event"] == "error"]
+    assert len(error_events) >= 1
+    assert "Model overloaded" in error_events[0]["data"]["message"]
+
+
+@patch("app.main.generate_answer_stream")
+@patch("app.main.retrieve", new_callable=AsyncMock)
+def test_query_stream_generation_raises(mock_retrieve, mock_stream):
+    """Stream yields error when generate_answer_stream raises (lines 306-308)."""
+    mock_retrieve.return_value = make_retrieve_result()
+
+    async def gen_raises(*args, **kwargs):
+        yield {"type": "token", "token": "a"}
+        raise RuntimeError("Stream connection lost")
+
+    mock_stream.side_effect = gen_raises
+    response = client.post("/api/query/stream", json={"query": "test"})
+    assert response.status_code == 200
+    events = parse_sse_events(response.text)
+    error_events = [e for e in events if e["event"] == "error"]
+    assert len(error_events) >= 1
+    assert "Stream connection lost" in error_events[0]["data"]["message"]

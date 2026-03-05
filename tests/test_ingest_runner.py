@@ -1,10 +1,12 @@
 """Tests for the ingestion benchmarking SSE stream generator."""
 
+import tempfile
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from app.services.ingest_runner import ingest_stream_generator
+from app.services.ingest_runner import ingest_stream_generator, _find_fortran_files
 from tests.helpers import collect_sse_events
 
 
@@ -14,6 +16,41 @@ async def test_unknown_model_emits_error():
     assert len(events) == 1
     assert events[0]["event"] == "error"
     assert "Unknown embedding model" in events[0]["data"]["message"]
+
+
+def test_find_fortran_files_finds_files():
+    """_find_fortran_files discovers .f files in SRC subdir (lines 31-40)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "SRC"
+        src.mkdir()
+        (src / "dgesv.f").write_text("      SUBROUTINE DGESV\n      END\n")
+        (src / "dgetrf.f").write_text("      SUBROUTINE DGETRF\n      END\n")
+        files = _find_fortran_files(Path(tmp), [".f"], ["SRC"])
+        assert len(files) == 2
+        names = {f.name for f in files}
+        assert "dgesv.f" in names
+        assert "dgetrf.f" in names
+
+
+def test_find_fortran_files_skips_missing_subdir():
+    """_find_fortran_files skips subdirs that don't exist (line 35)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        # No SRC dir - subdir_path.exists() is False, we continue
+        files = _find_fortran_files(Path(tmp), [".f"], ["SRC"])
+        assert len(files) == 0
+
+
+@pytest.mark.asyncio
+@patch("app.services.ingest_runner._ingest_lock")
+async def test_ingest_lock_held_emits_error(mock_lock):
+    """Ingestion emits error when lock is already held (lines 31-40)."""
+    mock_lock.locked.return_value = True
+    events = await collect_sse_events(
+        ingest_stream_generator("text-embedding-3-small")
+    )
+    assert len(events) == 1
+    assert events[0]["event"] == "error"
+    assert "already running" in events[0]["data"]["message"]
 
 
 @pytest.mark.asyncio
@@ -132,6 +169,55 @@ async def test_no_files_found_emits_error(mock_settings, mock_find):
 
 
 # --- Audit issue #21: Ingest error handling ---
+
+@pytest.mark.asyncio
+@patch("app.services.ingest_runner.upsert_chunks")
+@patch("app.services.ingest_runner.embed_texts")
+@patch("app.services.ingest_runner.ensure_collection")
+@patch("app.services.ingest_runner.delete_collection")
+@patch("app.services.ingest_runner.chunk_units")
+@patch("app.services.ingest_runner.parse_file")
+@patch("app.services.ingest_runner._find_fortran_files")
+@patch("app.services.ingest_runner.get_settings")
+async def test_ingest_rate_limit_retry_emits_progress(
+    mock_settings, mock_find, mock_parse, mock_chunk,
+    mock_delete_coll, mock_ensure_coll, mock_embed, mock_upsert,
+):
+    """Ingestion emits rate_limited progress when embed_texts raises 429 then succeeds (lines 130-139)."""
+    settings = MagicMock()
+    settings.DATA_DIR = "/tmp/fake_data"
+    mock_settings.return_value = settings
+
+    from pathlib import Path
+    with patch.object(Path, "exists", return_value=True):
+        mock_find.return_value = [Path("/tmp/fake_data/SRC/dgesv.f")]
+
+        mock_unit = MagicMock()
+        mock_unit.name = "DGESV"
+        mock_unit.called_routines = []
+        mock_parse.return_value = [mock_unit]
+
+        mock_chunk_obj = MagicMock()
+        mock_chunk_obj.text = "test"
+        mock_chunk.return_value = [mock_chunk_obj]
+
+        call_count = 0
+        def embed_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("429 RESOURCE_EXHAUSTED")
+            return [[0.1] * 1536]
+        mock_embed.side_effect = embed_side_effect
+
+        events = await collect_sse_events(
+            ingest_stream_generator("text-embedding-3-small")
+        )
+
+    rate_limited = [e for e in events if e["event"] == "progress" and e["data"].get("phase") == "rate_limited"]
+    assert len(rate_limited) >= 1
+    assert "summary" in [e["event"] for e in events]
+
 
 @pytest.mark.asyncio
 @patch("app.services.ingest_runner.embed_texts")

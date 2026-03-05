@@ -1,7 +1,9 @@
 """Tests for the SQLite trial store."""
 
+import sqlite3
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from app.services.trial_store import save_trial, list_trials, delete_trial
 
@@ -85,6 +87,46 @@ def test_save_trial_defaults():
 def test_list_trials_empty():
     db = _tmp_db()
     assert list_trials(db_path=db) == []
+
+
+def test_migration_operational_error_ignored():
+    """Migration OperationalError (column exists race) is caught and ignored (lines 63-64)."""
+    from app.services.trial_store import _CREATE_TABLE, _MIGRATIONS
+
+    db = _tmp_db()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db))
+    conn.execute(_CREATE_TABLE)
+    conn.close()
+
+    # Add a migration for a column we'll cause to "fail" (simulate race)
+    extra_migration = ("_test_race_col", "ALTER TABLE trials ADD COLUMN _test_race_col REAL")
+    alter_raised = [False]
+
+    class ConnWrapper:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, stmt, *args):
+            if "_test_race_col" in str(stmt) and not alter_raised[0]:
+                alter_raised[0] = True
+                raise sqlite3.OperationalError("duplicate column name")
+            return self._conn.execute(stmt, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    real_connect = sqlite3.connect
+
+    def patched_connect(db_path, *args, **kwargs):
+        return ConnWrapper(real_connect(db_path, *args, **kwargs))
+
+    import app.services.trial_store as ts_mod
+    with patch("app.services.trial_store.sqlite3.connect", patched_connect), \
+         patch.object(ts_mod, "_MIGRATIONS", _MIGRATIONS + [extra_migration]):
+        trial_id = save_trial({"model": "m", "eval_type": "r"}, db_path=db)
+    assert trial_id >= 1
+    assert len(list_trials(db_path=db)) == 1
 
 
 def test_save_ingestion_trial():

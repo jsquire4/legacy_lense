@@ -673,3 +673,90 @@ def test_messages_to_gemini_assistant_role():
     assert system == "You are helpful."
     assert len(contents) == 2
     assert contents[1].role == "model"
+
+
+# --- Exception handler coverage (lines 183-184, 268-270, 306-308, 344-346, 404-407) ---
+
+@pytest.mark.asyncio
+async def test_gemini_generate_valueerror_on_text(mock_gemini_gen_settings):
+    """_gemini_generate handles ValueError from response.text (lines 183-184)."""
+    settings, mock_client = mock_gemini_gen_settings
+
+    mock_response = MagicMock()
+    type(mock_response).text = property(lambda self: (_ for _ in ()).throw(ValueError("safety")))
+    mock_response.usage_metadata = None
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
+
+    chunks = [{"text": "code", "metadata": {}}]
+    result = await generate_answer("What?", chunks, None, model="gemini-2.5-flash")
+    assert result["answer"] == ""
+    assert "citations" in result
+
+
+@pytest.mark.asyncio
+async def test_generate_with_ttft_openai_exception(mock_gen_settings):
+    """_generate_with_ttft propagates when OpenAI create raises (lines 268-270)."""
+    from app.services.generation import _generate_with_ttft
+
+    settings, mock_client = mock_gen_settings
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("API down"))
+
+    with pytest.raises(RuntimeError, match="API down"):
+        await _generate_with_ttft(mock_client, "gpt-4o-mini", [{"role": "user", "content": "Hi"}], 100)
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_openai_exception(mock_gen_settings):
+    """generate_answer propagates when OpenAI create raises (lines 268-270)."""
+    settings, mock_client = mock_gen_settings
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("OpenAI API down"))
+
+    chunks = [{"text": "code", "metadata": {}}]
+    with pytest.raises(RuntimeError, match="OpenAI API down"):
+        await generate_answer("What?", chunks, None, model="gpt-4o-mini")
+
+
+@pytest.mark.asyncio
+async def test_gemini_generate_with_ttft_exception(mock_gemini_gen_settings):
+    """_gemini_generate_with_ttft propagates when stream raises (lines 306-308)."""
+    from app.services.generation import _gemini_generate_with_ttft
+
+    settings, mock_client = mock_gemini_gen_settings
+
+    async def raise_stream(*args, **kwargs):
+        yield "a", None
+        raise RuntimeError("Stream broken")
+
+    with patch("app.services.generation._gemini_generate_stream", side_effect=raise_stream):
+        with pytest.raises(RuntimeError, match="Stream broken"):
+            await _gemini_generate_with_ttft(
+                "gemini-2.5-flash",
+                [{"role": "user", "content": "Hi"}],
+                100,
+            )
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_stream_gemini_exception(mock_gemini_gen_settings):
+    """generate_answer_stream yields error when Gemini stream raises (lines 344-346)."""
+    settings, mock_client = mock_gemini_gen_settings
+    mock_client.aio.models.generate_content_stream = AsyncMock(
+        side_effect=RuntimeError("Gemini overloaded")
+    )
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.5-flash")]
+    assert events[-1]["type"] == "error"
+    assert "Gemini overloaded" in events[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_generate_answer_stream_openai_exception(mock_gen_settings):
+    """generate_answer_stream yields error when OpenAI create raises (lines 404-407)."""
+    settings, mock_client = mock_gen_settings
+    mock_client.chat.completions.create = AsyncMock(side_effect=RuntimeError("OpenAI down"))
+
+    chunks = [{"text": "code", "metadata": {}}]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gpt-4o-mini")]
+    assert events[-1]["type"] == "error"
+    assert "OpenAI down" in events[-1]["message"]

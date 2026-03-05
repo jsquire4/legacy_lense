@@ -2,60 +2,80 @@
 
 ## Overview
 
-LegacyLens is a RAG (Retrieval-Augmented Generation) application that makes the LAPACK Fortran codebase queryable via natural language. Users ask questions and receive citation-backed answers grounded in actual source code, with support for multiple OpenAI models and built-in evaluation tooling.
+LegacyLens is a RAG (Retrieval-Augmented Generation) application that makes the LAPACK Fortran codebase queryable via natural language. Users ask questions and receive citation-backed answers grounded in actual source code, with support for multiple LLM and embedding providers and a rigorous built-in evaluation system.
 
 ## System Architecture
 
 ```
-User Query → FastAPI → Hybrid Retrieval → Context Assembly → LLM Generation → Citation-enforced Response
+User Query → LLM Expansion → Embed (multi-provider) → Hybrid Search (5 strategies) → Context Assembly (3K tokens) → LLM Generation → Citation-enforced Response
 ```
 
 ### Components
 
-1. **FastAPI Web Server** (`app/main.py`) — Serves the web UI, REST API, streaming endpoints, eval harnesses, model registry, and trial CRUD
+1. **FastAPI Web Server** (`app/main.py`) — Serves the web UI, REST API, SSE streaming endpoints, eval harnesses, model registry, and trial CRUD
 2. **Fortran Parser** (`app/services/parser.py`) — Parses .f and .f90 files using fparser1/fparser2 with RAW fallback
-3. **Chunker** (`app/services/chunker.py`) — Splits parsed units into token-capped chunks (8191 token limit)
-4. **Embedding Service** (`app/services/embeddings.py`) — Generates embeddings via OpenAI text-embedding-3-small
-5. **Vector Store** (`app/services/vector_store.py`) — Manages Qdrant collection operations
-6. **Retrieval Service** (`app/services/retrieval.py`) — Hybrid retrieval: name match + query expansion + call-graph + vector similarity
-7. **Generation Service** (`app/services/generation.py`) — LLM answer generation with citation enforcement, reasoning model support, and legacy/modern API parameter handling
-8. **Capabilities** (`app/services/capabilities.py`) — 6 specialized code understanding prompts
-9. **Model Registry** (`app/models_data.py`) — 9 OpenAI models with pricing data, reasoning model detection, and legacy API detection
-10. **Trial Store** (`app/services/trial_store.py`) — SQLite-backed storage for eval trial results
-11. **Logging** (`app/logging_config.py`) — Structured JSON logging with rotating file handler
+3. **Chunker** (`app/services/chunker.py`) — Splits parsed units into token-capped chunks (8191-token limit, 50-token sliding window overlap)
+4. **Embedding Service** (`app/services/embeddings.py`) — Multi-provider embeddings: OpenAI, Voyage AI, Google Gemini, Cohere with per-provider batch sizes and token pre-truncation
+5. **Embedding Registry** (`app/embedding_registry.py`) — 9 embedding models across 4 providers with dimensions, tokenizers, and collection name mapping
+6. **Vector Store** (`app/services/vector_store.py`) — Manages Qdrant operations with payload indexes on unit_name, file_path, called_by for hybrid retrieval
+7. **Retrieval Service** (`app/services/retrieval.py`) — Five-strategy hybrid retrieval: name match, LLM query expansion (cached), call-graph following, caller impact analysis, vector similarity
+8. **Generation Service** (`app/services/generation.py`) — Multi-provider LLM generation (OpenAI + Gemini) with citation enforcement, streaming, TTFT tracking, and reasoning model support
+9. **Capabilities** (`app/services/capabilities.py`) — 7 specialized code understanding prompts (explain_code, generate_docs, detect_patterns, map_dependencies, impact_analysis, extract_business_rules, plus general-purpose)
+10. **Model Registry** (`app/models_data.py`) — 11 models across 2 providers (OpenAI + Gemini) with pricing data, reasoning model detection, and legacy API detection
+11. **Eval Runner** (`app/services/eval_runner.py`) — SSE streaming eval harness for retrieval (77 queries) and E2E (27 queries) with difficulty tiers and hallucination probes
+12. **Trial Store** (`app/services/trial_store.py`) — SQLite-backed storage for eval trial results with schema migrations
+13. **Logging** (`app/logging_config.py`) — Structured JSON logging with rotating file handler
 
 ## Model Support
 
-### Supported Models (9)
+### LLM Models (11)
 
-| Model | Type | Default |
-|-------|------|---------|
-| GPT-3.5-turbo | Legacy (uses `max_tokens`) | |
-| GPT-4o-mini | Standard | |
-| GPT-4o | Standard | |
-| GPT-4.1-nano | Standard | Yes |
-| GPT-4.1-mini | Standard | |
-| GPT-4.1 | Standard | |
-| GPT-5-nano | Reasoning | |
-| GPT-5-mini | Reasoning | |
-| GPT-5.2 | Reasoning | |
+| Model | Provider | Type | Default |
+|-------|----------|------|---------|
+| GPT-3.5-turbo | OpenAI | Legacy (uses `max_tokens`) | |
+| GPT-4o-mini | OpenAI | Standard | |
+| GPT-4o | OpenAI | Standard | |
+| GPT-4.1-nano | OpenAI | Standard | Yes |
+| GPT-4.1-mini | OpenAI | Standard | |
+| GPT-4.1 | OpenAI | Standard | |
+| GPT-5-nano | OpenAI | Reasoning | |
+| GPT-5-mini | OpenAI | Reasoning | |
+| GPT-5.2 | OpenAI | Reasoning | |
+| Gemini 2.5 Flash | Google | Standard | |
+| Gemini 2.5 Pro | Google | Standard | |
+
+### Embedding Models (9)
+
+| Model | Provider | Dimensions | Max Tokens |
+|-------|----------|------------|------------|
+| text-embedding-3-small | OpenAI | 1536 | 8191 |
+| text-embedding-3-large | OpenAI | 3072 | 8191 |
+| text-embedding-ada-002 | OpenAI | 1536 | 8191 |
+| voyage-code-3 | Voyage AI | 1024 | 32000 |
+| voyage-4-large | Voyage AI | 1024 | 32000 |
+| voyage-4 | Voyage AI | 1024 | 32000 |
+| voyage-4-lite | Voyage AI | 1024 | 32000 |
+| gemini-embedding-001 | Google | 3072 | 2048 |
+| embed-v4.0 | Cohere | 1536 | 128000 |
+
+Each embedding model gets its own Qdrant collection (e.g., `lapack_voyage-code-3`), allowing head-to-head retrieval quality comparison via the eval harness.
 
 ### Model-specific API Handling
 
 - **Legacy models** (GPT-3.5-turbo): Use `max_tokens` parameter, standard `temperature`
-- **Standard models** (GPT-4o/4.1 series): Use `max_completion_tokens`, standard `temperature`
+- **Standard models** (GPT-4o/4.1 series, Gemini): Use `max_completion_tokens`, standard `temperature`
 - **Reasoning models** (GPT-5 series): Use `max_completion_tokens`, `reasoning_effort="low"` instead of `temperature`
 
 ### Cache Warming
 
-On startup, the app pre-caches responses for 7 default queries across 3 cheap models (GPT-4.1-nano, GPT-4o-mini, GPT-5-nano) — 21 cached responses for instant first-query performance.
+On startup, the app pre-caches responses for default queries across cheap models for instant first-query performance.
 
 ## Key Design Decisions
 
-### Why Qdrant Cloud (not self-hosted)?
-- Same client code, zero infrastructure management
-- Free tier provides 1GB (sufficient for LAPACK embeddings)
-- Avoids Railway volume permission issues with self-hosted Qdrant
+### Why self-hosted Qdrant (not Qdrant Cloud)?
+- Co-located on Railway internal network — ~10-30ms per query vs ~100-200ms with external hosting
+- Multiple collections (one per embedding model) for head-to-head comparison
+- No free-tier storage limits when running multiple embedding model collections
 
 ### Why fparser (not regex)?
 - Handles both fixed-form (.f) and free-form (.f90) Fortran
@@ -75,16 +95,14 @@ On startup, the app pre-caches responses for 7 default queries across 3 cheap mo
 - Call-graph following retrieves implementation dependencies (one hop) for better context
 - Vector similarity fills remaining slots for broad coverage
 
-### Why text-embedding-3-small?
-- Best cost/quality tradeoff for code-heavy corpus: $0.02/1M tokens
-- 1536 dimensions — half the size of text-embedding-3-large (3072d), lower storage cost in Qdrant
-- MTEB benchmark scores within ~2% of text-embedding-3-large for retrieval tasks
-- text-embedding-ada-002 (same 1536d) costs 5x more with lower quality
-- Multi-model support allows ingesting with text-embedding-3-large for comparison via `--embedding-model` flag
+### Why multi-provider embeddings?
+- Different embedding models excel at different retrieval tasks — code-specialized models (Voyage) vs general-purpose (OpenAI) vs high-dimensional (Gemini)
+- Per-collection storage in Qdrant allows ingesting once per model and comparing retrieval quality via the eval harness
+- Default is OpenAI text-embedding-3-small (1536-dim, $0.02/1M tokens) — best cost/quality tradeoff for the code-heavy corpus
 
 ### Why no framework (LangChain, LlamaIndex)?
 - Custom pipeline maximizes understanding of RAG mechanics
-- Direct use of OpenAI SDK + Qdrant client keeps dependencies minimal
+- Direct use of provider SDKs + Qdrant client keeps dependencies minimal
 - Full control over chunking strategy, context assembly, and citation enforcement
 
 ### Why 3000-token context budget?
@@ -107,33 +125,45 @@ Fortran Files → Parser (fparser1/fparser2) → ParsedUnits → Chunker → Chu
 ### Query Pipeline
 ```
 User Query
-  ├─ Embed query (text-embedding-3-small)
-  ├─ Detect routine name? → Name-match search (Qdrant payload filter)
-  │   └─ Follow call-graph one hop
-  ├─ No name? → LLM query expansion → Search each expanded name
-  └─ Vector similarity search (cosine, top_k=8)
+  ├─ Embed query (swappable: OpenAI / Voyage / Gemini / Cohere)
+  ├─ Detect routine name? → Name-match search (Qdrant payload filter, top-3)
+  │   └─ Follow call-graph one hop (called_routines metadata)
+  ├─ Impact analysis? → Caller lookup (called_by metadata filter, top-5)
+  ├─ Conceptual query? → LLM query expansion (5-8 names, 256-entry LRU cache) → Search each
+  └─ Vector similarity search (cosine, top_k=5)
       ↓
   Merge & deduplicate → Context assembly (3K token budget) → LLM (2048 response tokens) → Citation enforcement → Response
 ```
 
 ## Evaluation
 
-### Retrieval Evals (37 queries)
+### Retrieval Evals (77 queries, 3 difficulty tiers)
 - Tests that the right files are retrieved per capability domain
-- Measures Precision@5, Recall@5, and retrieval latency
-- Embedding-based — model-independent
+- **Easy** (~32): named routines, direct matches (e.g., "What does DGESV do?")
+- **Medium** (~30): less famous routines, multi-file expected sets (e.g., "How does LAPACK compute eigenvalues?")
+- **Hard** (~15): variant disambiguation, multi-file chains (e.g., "Compare DGESVD vs DGESDD vs DGESVDX")
+- Metrics per query: Precision@K (1/3/5), Recall@K (1/3/5), MRR, NDCG@5, negative oracle penalty
+- P@5 displayed as percentage of theoretical maximum (accounts for structural ceiling when |expected| < k)
+- Summary includes per-difficulty breakdown (avg recall, avg MRR, count)
+- Embedding-model selectable — tests any ingested collection
 
-### E2E Generation Evals (21 queries)
-- Tests full retrieve + generate pipeline with quality checks
-- Per-query checks: citations present, minimum answer length, expected keywords, refusal detection
-- Refusal detection auto-fails answers containing "insufficient context", "I don't know", etc.
-- Model-selectable — run against any of the 9 supported models
+### E2E Generation Evals (27 queries)
+- **21 normal queries** with source-verified golden answers across all 7 capabilities
+- **6 hallucination probes** for nonexistent routines (DFAKE, DGESVM, QGESV, DLASOR, DGEMN, ZLATRS2) — must trigger refusal
+- Quality gates (all must pass for overall pass):
+  - Citation presence and relevance (cited files match expected files)
+  - Citation fallback detection (flags auto-generated citations vs LLM-cited)
+  - Minimum answer length (200 chars)
+  - ALL-keyword matching (every keyword must appear, source-verified against LAPACK code)
+  - Embedding similarity gate (cosine similarity between generated and golden answer ≥ 0.75)
+  - Refusal detection (auto-fails normal answers that dodge; auto-passes probe refusals)
+- Run against any LLM + embedding model combination
 - Unified token budgets: 3000 context tokens, 2048 response tokens
 
 ### Trial Storage
-- SQLite-backed trial results (ephemeral on Railway, persistent locally)
+- SQLite-backed trial results with schema migrations for new metric columns
 - Auto-saves after each eval run
-- Trial history table with per-model comparison and best-value highlighting
+- Trial history tables with per-metric breakdown, best-value highlighting, and separate embedding/LLM columns
 
 ## Observability
 
@@ -147,10 +177,10 @@ Structured JSON logs are written to `logs/legacylens.jsonl` with rotating file h
 
 ## Deployment
 
-- **Application**: Railway single service (Dockerfile)
-- **Vector DB**: Qdrant Cloud
-- **Local dev**: `docker compose up --build`
-- **Ingestion**: Runs locally via `scripts/ingest.py`
+- **Application**: Railway single service (Python 3.12-slim Dockerfile, non-root user)
+- **Vector DB**: Qdrant self-hosted as a separate Railway service (co-located on internal network)
+- **Local dev**: `docker compose up --build` (app + Qdrant)
+- **Ingestion**: Runs locally via `scripts/ingest.py` — parse, chunk, embed, upsert per collection
 - **CI/CD**: Auto-deploys on push to GitHub
 
 ## Error Handling Strategy

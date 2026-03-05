@@ -137,6 +137,11 @@ def test_ndcg_empty_expected():
     assert compute_ndcg_at_k(["a.f", "b.f"], [], k=5) == 0.0
 
 
+def test_ndcg_zero_k_returns_zero():
+    """k=0 gives n_relevant=0, idcg=0, hits idcg==0.0 branch."""
+    assert compute_ndcg_at_k(["a.f"], ["a.f"], k=0) == 0.0
+
+
 def test_ndcg_single_relevant_at_top():
     result = compute_ndcg_at_k(["a.f", "x.f"], ["a.f"], k=5)
     assert abs(result - 1.0) < 1e-9

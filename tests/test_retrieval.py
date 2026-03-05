@@ -70,6 +70,65 @@ async def test_expand_query_exception_returns_empty(mock_settings, mock_client_f
     assert result == []
 
 
+@patch("app.services.retrieval.get_async_openai_client")
+@patch("app.services.retrieval.get_settings")
+@pytest.mark.asyncio
+async def test_expand_query_cache_hit_returns_cached(mock_settings, mock_client_fn):
+    """Second expand_query with same query returns cached result, no API call."""
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    mock_msg = MagicMock()
+    mock_msg.content = "DGESV DGETRF"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message = mock_msg
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    mock_client_fn.return_value = mock_client
+
+    result1 = await _expand_query("How does LU work?")
+    result2 = await _expand_query("How does LU work?")
+    assert result1 == result2
+    assert "DGESV" in result1
+    mock_client.chat.completions.create.assert_called_once()
+
+
+@patch("app.services.retrieval._EXPANSION_CACHE_MAX", 3)
+@patch("app.services.retrieval.get_async_openai_client")
+@patch("app.services.retrieval.get_settings")
+@pytest.mark.asyncio
+async def test_expand_query_cache_eviction(mock_settings, mock_client_fn):
+    """Cache evicts oldest when exceeding _EXPANSION_CACHE_MAX (line 112)."""
+    from app.services.retrieval import _EXPANSION_CACHE
+
+    _EXPANSION_CACHE.clear()
+    settings = MagicMock()
+    settings.CHAT_MODEL = "gpt-4o-mini"
+    mock_settings.return_value = settings
+
+    mock_msg = MagicMock()
+    mock_msg.content = "DGESV DGETRF"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock()]
+    mock_response.choices[0].message = mock_msg
+
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    mock_client_fn.return_value = mock_client
+
+    await _expand_query("query1")
+    await _expand_query("query2")
+    await _expand_query("query3")
+    await _expand_query("query4")  # Evicts query1
+
+    assert ("query1", "gpt-4o-mini") not in _EXPANSION_CACHE
+    assert ("query4", "gpt-4o-mini") in _EXPANSION_CACHE
+    _EXPANSION_CACHE.clear()
+
+
 @patch("app.services.retrieval.get_settings")
 @patch("app.services.gemini_helpers.get_gemini_client")
 @pytest.mark.asyncio

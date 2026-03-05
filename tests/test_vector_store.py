@@ -10,6 +10,8 @@ from app.services.vector_store import (
     search_by_name,
     async_search,
     async_search_by_name,
+    async_search_by_caller,
+    delete_collection,
     get_async_qdrant_client,
 )
 from app.services.chunker import Chunk
@@ -65,6 +67,21 @@ def test_upsert_chunks(mock_settings, mock_client_fn):
 
     upsert_chunks(chunks, embeddings)
     mock_client.upsert.assert_called_once()
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_search_with_explicit_collection_name(mock_settings, mock_client_fn):
+    """search with collection_name uses it directly (line 43)."""
+    mock_settings.return_value = MagicMock(QDRANT_COLLECTION_NAME="default")
+    mock_client = MagicMock()
+    mock_client.query_points.return_value.points = []
+    mock_client_fn.return_value = mock_client
+
+    results = search([0.1] * 1536, top_k=5, collection_name="custom-collection")
+    assert results == []
+    call_kwargs = mock_client.query_points.call_args.kwargs
+    assert call_kwargs["collection_name"] == "custom-collection"
 
 
 @patch("app.services.vector_store.get_qdrant_client")
@@ -276,5 +293,71 @@ async def test_async_search_by_name(mock_settings, mock_client_fn):
     results = await async_search_by_name([0.1] * 1536, "DGESV", top_k=3)
     assert len(results) == 1
     assert results[0]["metadata"]["unit_name"] == "DGESV"
+    call_kwargs = mock_client.query_points.call_args.kwargs
+    assert "query_filter" in call_kwargs
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_delete_collection_not_found_returns_false(mock_settings, mock_client_fn):
+    """delete_collection returns False when collection does not exist (lines 126-132)."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "lapack"
+    mock_settings.return_value = settings
+
+    mock_coll = MagicMock()
+    mock_coll.name = "other-collection"
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value.collections = [mock_coll]
+    mock_client_fn.return_value = mock_client
+
+    result = delete_collection("missing-collection")
+    assert result is False
+    mock_client.delete_collection.assert_not_called()
+
+
+@patch("app.services.vector_store.get_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+def test_delete_collection_found_returns_true(mock_settings, mock_client_fn):
+    """delete_collection returns True and deletes when collection exists (lines 128-131)."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "lapack"
+    mock_settings.return_value = settings
+
+    mock_coll = MagicMock()
+    mock_coll.name = "lapack-text-embedding-3-small"
+    mock_client = MagicMock()
+    mock_client.get_collections.return_value.collections = [mock_coll]
+    mock_client_fn.return_value = mock_client
+
+    result = delete_collection("lapack-text-embedding-3-small")
+    assert result is True
+    mock_client.delete_collection.assert_called_once_with("lapack-text-embedding-3-small")
+
+
+@patch("app.services.vector_store.get_async_qdrant_client")
+@patch("app.services.vector_store.get_settings")
+@pytest.mark.asyncio
+async def test_async_search_by_caller(mock_settings, mock_client_fn):
+    """async_search_by_caller uses called_routines filter (lines 208-220)."""
+    settings = MagicMock()
+    settings.QDRANT_COLLECTION_NAME = "test"
+    mock_settings.return_value = settings
+
+    mock_point = MagicMock()
+    mock_point.id = "caller-1"
+    mock_point.score = 0.92
+    mock_point.payload = {"text": "calls DGEMM", "called_routines": ["DGEMM"], "file_path": "x.f"}
+
+    mock_result = MagicMock()
+    mock_result.points = [mock_point]
+
+    mock_client = AsyncMock()
+    mock_client.query_points = AsyncMock(return_value=mock_result)
+    mock_client_fn.return_value = mock_client
+
+    results = await async_search_by_caller([0.1] * 1536, "DGEMM", top_k=5)
+    assert len(results) == 1
+    assert results[0]["metadata"]["called_routines"] == ["DGEMM"]
     call_kwargs = mock_client.query_points.call_args.kwargs
     assert "query_filter" in call_kwargs

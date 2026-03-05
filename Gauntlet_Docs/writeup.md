@@ -6,11 +6,17 @@
 
 **Python 3.12 / FastAPI** — First Python project. Chose FastAPI for its async support, automatic OpenAPI docs, and minimal boilerplate. The entire backend is a single `app/main.py` with service modules — no framework overhead.
 
-**OpenAI SDK** — Two models:
-- `text-embedding-3-small` (1536-dim) for embeddings. Cheap ($0.02/1M tokens), good enough for code retrieval where metadata enrichment does the heavy lifting.
-- Defaults to `gpt-4.1-nano` for generation, but supports 9 models total — `gpt-3.5-turbo`, `gpt-4o-mini`, `gpt-4o`, `gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-4.1`, `gpt-5-nano`, `gpt-5-mini`, and `gpt-5.2` — via a runtime model selector. This lets users compare end-to-end response latency, answer quality, and citation accuracy across model generations, sizes, and reasoning abilities. The quality ceiling is the retrieved context, not the model.
+**Embeddings (4 providers)** — Swappable embedding models with per-collection Qdrant storage:
+- OpenAI `text-embedding-3-small` (1536-dim) and `text-embedding-3-large` (3072-dim)
+- Voyage AI `voyage-code-3`, `voyage-4-large`, `voyage-4`, `voyage-4-lite` (1024-dim)
+- Google Gemini `gemini-embedding-001` (3072-dim)
+- Cohere `embed-v4.0` (1536-dim)
 
-**Qdrant** — Purpose-built vector DB with payload filtering. This was the key enabler for hybrid retrieval — I could do exact name matches via payload filter AND cosine similarity in the same system. Started on Qdrant Cloud free tier, moved to self-hosted on Railway for latency gains (co-located with the app on the same internal network).
+Each embedding model gets its own Qdrant collection, so you can ingest once per model and compare retrieval quality head-to-head via the eval harness.
+
+**LLMs (2 providers)** — Defaults to `gpt-4.1-nano` for generation, but supports 11 models total — OpenAI (`gpt-3.5-turbo`, `gpt-4o-mini`, `gpt-4o`, `gpt-4.1-nano`, `gpt-4.1-mini`, `gpt-4.1`, `gpt-5-nano`, `gpt-5-mini`, `gpt-5.2`) and Google Gemini (`gemini-2.5-flash`, `gemini-2.5-pro`) — via a runtime model selector. This lets users compare end-to-end response latency, answer quality, and citation accuracy across providers, model generations, sizes, and reasoning abilities. The quality ceiling is the retrieved context, not the model.
+
+**Qdrant** — Purpose-built vector DB with payload filtering. This was the key enabler for hybrid retrieval — exact name matches via payload filter AND cosine similarity in the same system. Self-hosted on Railway, co-located with the app on the same internal network for low-latency retrieval (~10-30ms per query vs ~100-200ms with external hosting).
 
 **fparser** — Python library for parsing Fortran ASTs. Handles both fixed-form FORTRAN 77 (.f) and free-form Fortran 90 (.f90). This was critical for syntax-aware chunking — regex alone breaks on continuation lines, comment keywords, and bare END statements. fparser gives real AST boundaries.
 
@@ -45,7 +51,7 @@ High-level LAPACK routines delegate most of their work to lower-level helpers. I
 
 ### What if multiple search strategies find the same chunk?
 
-The system searches four different ways (name match, expansion, call-graph, similarity). These often return overlapping results. Duplicates are removed, keeping only the highest-scored instance of each chunk.
+The system searches five different ways (name match, expansion, call-graph, caller impact, similarity). These often return overlapping results. Duplicates are removed, keeping only the highest-scored instance of each chunk.
 
 ### What if nothing relevant is found?
 
@@ -86,5 +92,5 @@ Run sequentially, this easily exceeds 3s. With query expansion triggering 5-8 in
 
 **4. Context budget enforcement** — Early versions stuffed too many tokens into the generation prompt, causing gpt-4o to take longer. Capping context at 3,000 tokens kept generation time predictable at 1-2s.
 
-**5. Eval pipeline optimization** — The eval harness (37 queries) was taking 10+ minutes. Batching retrieval with `asyncio.gather()` (5 queries at a time to balance throughput and API limits) brought it under 3 minutes. Not user-facing latency, but critical for rapid iteration on retrieval quality.
+**5. Eval pipeline optimization** — The eval harness (77 retrieval + 27 E2E queries) uses batched `asyncio.gather()` (5 queries at a time to balance throughput and API limits). Not user-facing latency, but critical for rapid iteration on retrieval quality.
 

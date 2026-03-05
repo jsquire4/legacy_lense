@@ -30,6 +30,28 @@ def test_metadata_header_present():
     assert "CALLS: DGEMM" in chunks[0].text
 
 
+def test_chunk_header_and_metadata_includes_called_by():
+    """called_by_map produces CALLED_BY in header and metadata."""
+    unit = _make_unit(name="DTEST", source_text="X = 1")
+    called_by_map = {"DTEST": ["DGESV", "DGETRF"]}
+    chunks = chunk_units([unit], called_by_map=called_by_map)
+    assert len(chunks) == 1
+    assert "CALLED_BY: DGESV, DGETRF" in chunks[0].text
+    assert chunks[0].metadata.get("called_by") == ["DGESV", "DGETRF"]
+
+
+def test_chunked_unit_includes_called_by_in_split_chunks():
+    """Oversized unit with called_by_map includes CALLED_BY in each split chunk."""
+    big_source = "      X = X + 1\n" * 5000
+    unit = _make_unit(name="BIGSUB", source_text=big_source)
+    called_by_map = {"BIGSUB": ["MAIN", "DRIVER"]}
+    chunks = chunk_units([unit], max_tokens=500, called_by_map=called_by_map)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert "CALLED_BY: MAIN, DRIVER" in c.text
+        assert c.metadata.get("called_by") == ["MAIN", "DRIVER"]
+
+
 def test_doc_comments_included():
     unit = _make_unit(doc_comments="This routine computes eigenvalues")
     chunks = chunk_units([unit])

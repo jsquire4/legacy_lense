@@ -418,6 +418,154 @@ def test_embed_texts_gemini_batching(mock_settings, mock_gemini_fn):
     assert mock_client.models.embed_content.call_count == 2  # 100 + 50
 
 
+# --- Client missing API key (coverage for lines 73-77, 82-86, 90-91, 96-100, 105-109) ---
+
+@patch("app.services.embeddings.get_settings")
+def test_get_voyage_client_missing_key_raises(mock_settings):
+    """_get_voyage_client raises when VOYAGE_API_KEY is empty (lines 75-76)."""
+    settings = MagicMock()
+    settings.VOYAGE_API_KEY = ""
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_voyage_client
+    _get_voyage_client.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="VOYAGE_API_KEY"):
+            _get_voyage_client()
+    finally:
+        _get_voyage_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+def test_get_voyage_client_returns_client(mock_settings):
+    """_get_voyage_client returns client when key present (line 77)."""
+    settings = MagicMock()
+    settings.VOYAGE_API_KEY = "voyage-test-key"
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_voyage_client
+    _get_voyage_client.cache_clear()
+    try:
+        client = _get_voyage_client()
+        assert client is not None
+    finally:
+        _get_voyage_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+def test_get_async_voyage_client_missing_key_raises(mock_settings):
+    """_get_async_voyage_client raises when VOYAGE_API_KEY is empty (lines 84-85)."""
+    settings = MagicMock()
+    settings.VOYAGE_API_KEY = ""
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_async_voyage_client
+    _get_async_voyage_client.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="VOYAGE_API_KEY"):
+            _get_async_voyage_client()
+    finally:
+        _get_async_voyage_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+@pytest.mark.asyncio
+async def test_get_async_voyage_client_returns_client(mock_settings):
+    """_get_async_voyage_client returns client when key present (line 86)."""
+    settings = MagicMock()
+    settings.VOYAGE_API_KEY = "voyage-test-key"
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_async_voyage_client
+    _get_async_voyage_client.cache_clear()
+    try:
+        client = _get_async_voyage_client()
+        assert client is not None
+    finally:
+        _get_async_voyage_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+def test_get_cohere_client_missing_key_raises(mock_settings):
+    """_get_cohere_client raises when COHERE_API_KEY is empty (lines 98-99)."""
+    settings = MagicMock()
+    settings.COHERE_API_KEY = ""
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_cohere_client
+    _get_cohere_client.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="COHERE_API_KEY"):
+            _get_cohere_client()
+    finally:
+        _get_cohere_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+def test_get_cohere_client_returns_client(mock_settings):
+    """_get_cohere_client returns client when key present (lines 90-91)."""
+    settings = MagicMock()
+    settings.COHERE_API_KEY = "cohere-test-key"
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_cohere_client
+    _get_cohere_client.cache_clear()
+    try:
+        client = _get_cohere_client()
+        assert client is not None
+    finally:
+        _get_cohere_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+def test_get_async_cohere_client_missing_key_raises(mock_settings):
+    """_get_async_cohere_client raises when COHERE_API_KEY is empty (lines 106-107)."""
+    settings = MagicMock()
+    settings.COHERE_API_KEY = ""
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_async_cohere_client
+    _get_async_cohere_client.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="COHERE_API_KEY"):
+            _get_async_cohere_client()
+    finally:
+        _get_async_cohere_client.cache_clear()
+
+
+@patch("app.services.embeddings.get_settings")
+@pytest.mark.asyncio
+async def test_get_async_cohere_client_returns_client(mock_settings):
+    """_get_async_cohere_client returns client when key present (line 100)."""
+    settings = MagicMock()
+    settings.COHERE_API_KEY = "cohere-test-key"
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_async_cohere_client
+    _get_async_cohere_client.cache_clear()
+    try:
+        client = _get_async_cohere_client()
+        assert client is not None
+    finally:
+        _get_async_cohere_client.cache_clear()
+
+
+@patch("app.services.gemini_helpers.get_settings")
+def test_get_gemini_client_returns_client(mock_settings):
+    """_get_gemini_client returns client when key present (line 109)."""
+    settings = MagicMock()
+    settings.GEMINI_API_KEY = "gemini-test-key"
+    mock_settings.return_value = settings
+
+    from app.services.embeddings import _get_gemini_client
+    try:
+        client = _get_gemini_client()
+        assert client is not None
+    finally:
+        from app.services.gemini_helpers import get_gemini_client
+        get_gemini_client.cache_clear()
+
+
 # --- Audit issue #20: Gemini client missing key ---
 
 @patch("app.services.gemini_helpers.get_settings")

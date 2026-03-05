@@ -4,14 +4,16 @@ A RAG application for querying the LAPACK Fortran codebase via natural language.
 
 ## Features
 
-- **Hybrid retrieval**: name matching, LLM query expansion, call-graph following, and vector similarity
-- **6 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping, impact analysis, business rule extraction
-- **9 model support**: GPT-3.5-turbo through GPT-5.2 with automatic API parameter handling for legacy, standard, and reasoning models
-- **Model comparison**: built-in E2E eval harness with trial storage for comparing model quality and latency
-- **Cache warming**: pre-cached responses for default queries across 3 cheap models for instant performance
-- **Citation enforcement**: every answer includes file:line references
+- **Hybrid retrieval**: name matching, LLM query expansion, call-graph following, caller impact analysis, and vector similarity
+- **7 specialized capabilities**: code explanation, documentation generation, pattern detection, dependency mapping, impact analysis, business rule extraction, plus general-purpose
+- **Multi-provider LLMs**: OpenAI (GPT-3.5-turbo through GPT-5.2) and Google Gemini (2.5-flash, 2.5-pro) with automatic API parameter handling
+- **Multi-provider embeddings**: OpenAI, Voyage AI, Google Gemini, and Cohere — per-collection model selection with separate Qdrant collections
+- **Rigorous eval system**: 77 retrieval queries across 3 difficulty tiers with MRR, NDCG@5, P@K, R@K, and negative oracle metrics; 27 E2E queries with embedding similarity, source-verified golden answers, and 6 hallucination probes
+- **Model comparison**: built-in eval harness with trial storage for comparing model quality and latency across embedding + LLM combinations
+- **Cache warming**: pre-cached responses for default queries across cheap models for instant performance
+- **Citation enforcement**: every answer includes file:line references with fallback detection
 - **Refusal detection**: auto-fails eval answers that dodge the question
-- **Observability**: per-query timing, token usage, chunk scores, and retrieval strategy details
+- **Observability**: per-query timing, token usage, chunk scores, retrieval strategy details, and TTFT tracking
 - **Structured logging**: rotating JSON log files
 
 ## Quick Start
@@ -19,8 +21,12 @@ A RAG application for querying the LAPACK Fortran codebase via natural language.
 ### Prerequisites
 
 - Python 3.12+
-- OpenAI API key
-- Qdrant Cloud instance (free tier works)
+- Docker (for Qdrant)
+- OpenAI API key (required — used for default embeddings and generation)
+- Optional provider keys for additional models:
+  - `VOYAGE_API_KEY` — Voyage AI embeddings (voyage-code-3, voyage-4-*)
+  - `GEMINI_API_KEY` — Google Gemini embeddings + LLM generation
+  - `COHERE_API_KEY` — Cohere embeddings (embed-v4.0)
 
 ### Local Development
 
@@ -31,30 +37,40 @@ A RAG application for querying the LAPACK Fortran codebase via natural language.
    pip install -r requirements.txt
    ```
 
-2. Configure environment:
+2. Start Qdrant:
    ```bash
-   cp .env.example .env
-   # Fill in: OPENAI_API_KEY, QDRANT_URL, QDRANT_API_KEY
+   docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant:latest
    ```
 
-3. Ingest the LAPACK codebase (one-time):
+3. Configure environment:
+   ```bash
+   cp .env.example .env
+   # Required: OPENAI_API_KEY, QDRANT_URL=http://localhost:6333
+   # Optional: VOYAGE_API_KEY, GEMINI_API_KEY, COHERE_API_KEY
+   ```
+
+4. Ingest the LAPACK codebase (one-time):
    ```bash
    git clone https://github.com/Reference-LAPACK/lapack.git data/lapack
    python scripts/ingest.py
+   # To ingest with a different embedding model:
+   # python scripts/ingest.py --embedding-model voyage-code-3
    ```
 
-4. Run the server:
+5. Run the server:
    ```bash
    uvicorn app.main:app --reload
    ```
 
-5. Open http://localhost:8000
+6. Open http://localhost:8000
 
-### Docker
+### Docker (app + Qdrant together)
 
 ```bash
 docker compose up --build
 ```
+
+This starts both the app and Qdrant. You'll still need to run `scripts/ingest.py` separately to populate the vector store.
 
 ## API Reference
 
@@ -90,27 +106,33 @@ CRUD for eval trial results.
 ## Architecture
 
 ```
-Query → Embed → Hybrid Search → Context Assembly (3K tokens) → LLM (2048 response tokens) → Citation-enforced Response
+Query → Expand (LLM) → Embed (multi-provider) → Hybrid Search → Context Assembly (3K tokens) → LLM Generation → Citation-enforced Response
 ```
 
-Hybrid search merges:
-1. **Name match** — Qdrant payload filter for detected routine names
-2. **Query expansion** — LLM identifies relevant routine names for conceptual queries
-3. **Call-graph following** — one-hop expansion of called routines
-4. **Vector similarity** — cosine similarity fills remaining slots
+Hybrid search merges five strategies in parallel:
+1. **Name match** — Qdrant payload filter for detected routine names (top-3)
+2. **Query expansion** — LLM identifies 5-8 relevant routine names for conceptual queries (cached, 256-entry LRU)
+3. **Call-graph following** — one-hop expansion via `called_routines` metadata
+4. **Caller impact analysis** — reverse lookup via `called_by` metadata (top-5)
+5. **Vector similarity** — cosine similarity fills remaining slots
 
 See [docs/architecture.md](docs/architecture.md) for full details.
 
 ## Evaluation
 
-### Retrieval Evals (37 queries)
-- Precision@5, Recall@5, and latency per query
-- Embedding-based, model-independent
+### Retrieval Evals (77 queries, 3 difficulty tiers)
+- Metrics: Precision@K (1/3/5), Recall@K (1/3/5), MRR, NDCG@5, negative oracle penalty
+- P@5 displayed as percentage of theoretical maximum to account for structural ceiling
+- Difficulty breakdown (easy/medium/hard) with per-tier stats
+- Embedding-based — tests any embedding model via collection selection
 
-### E2E Generation Evals (21 queries)
-- Quality checks: citations, answer length, keywords, refusal detection
-- Run against any supported model
-- Results auto-saved to trial history for comparison
+### E2E Generation Evals (27 queries)
+- 21 normal queries with source-verified golden answers and ALL-keyword matching
+- 6 hallucination probes for nonexistent routines (must trigger refusal)
+- Embedding similarity gate: cosine similarity between generated and golden answer embeddings (threshold 0.75)
+- Citation relevance checking against expected files, with fallback detection
+- Run against any supported LLM + embedding model combination
+- Results auto-saved to trial history with per-metric breakdown
 
 ```bash
 python scripts/evaluate.py
@@ -118,23 +140,26 @@ python scripts/evaluate.py
 
 ## Deployment
 
-Deployed on Railway with auto-deploy on push. Qdrant Cloud for vector storage.
+Deployed on Railway with auto-deploy on push. App and Qdrant run as separate Railway services on the same internal network for low-latency retrieval.
 
 **Live**: https://legacylense-production.up.railway.app
 
 Environment variables required:
 - `OPENAI_API_KEY`
 - `QDRANT_URL`
-- `QDRANT_API_KEY`
+- `QDRANT_API_KEY` (optional for self-hosted)
+- `VOYAGE_API_KEY` (optional, for Voyage AI embeddings)
+- `GEMINI_API_KEY` (optional, for Gemini embeddings/generation)
+- `COHERE_API_KEY` (optional, for Cohere embeddings)
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12, FastAPI |
-| Embeddings | OpenAI text-embedding-3-small (1536-dim) |
-| LLM | 9 OpenAI models (default: GPT-4.1-nano) |
-| Vector DB | Qdrant Cloud |
-| Parser | fparser (AST-based Fortran parsing) |
-| Trial Storage | SQLite |
-| Deployment | Railway + Docker |
+| Backend | Python 3.12, FastAPI, Uvicorn |
+| Embeddings | OpenAI (1536/3072-dim), Voyage AI (1024-dim), Gemini (3072-dim), Cohere (1536-dim) |
+| LLM | OpenAI (GPT-3.5-turbo through GPT-5.2) + Google Gemini (2.5-flash, 2.5-pro) |
+| Vector DB | Qdrant (self-hosted on Railway) |
+| Parser | fparser (AST-based Fortran parsing with RAW fallback) |
+| Trial Storage | SQLite with schema migrations |
+| Deployment | Railway (app + Qdrant) + Docker Compose (local) |

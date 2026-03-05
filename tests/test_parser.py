@@ -8,6 +8,7 @@ from app.services.parser import (
     _clean_doc_comments,
     _extract_called_routines,
     _extract_doc_comments,
+    _get_fparser2_span,
     parse_file,
 )
 
@@ -285,6 +286,32 @@ def test_parse_fixed_form_module_via_real_parser(tmp_fortran_file):
 
 
 @patch("fparser.one.parsefortran.FortranParser")
+def test_parse_fixed_form_span_extraction_fallback(mock_parser_cls, tmp_fortran_file):
+    """When content[-1].item.span raises, fall back to item.item.span[1] (lines 109-110)."""
+    sub_item = MagicMock()
+    sub_item.name = "FALLBACK"
+    sub_item.__class__.__name__ = "Subroutine"
+    sub_item.__str__ = lambda self: "      SUBROUTINE FALLBACK\n      END"
+    sub_item.item = MagicMock()
+    sub_item.item.span = (3, 8)
+    # content[-1] has no .item - triggers AttributeError, fallback to item.item.span[1]
+    bad_end = MagicMock(spec=[])  # no .item attribute
+    sub_item.content = [sub_item.item, bad_end]
+
+    mock_block = MagicMock()
+    mock_block.content = [sub_item]
+
+    mock_parser = MagicMock()
+    mock_parser.block = mock_block
+    mock_parser_cls.return_value = mock_parser
+
+    path = tmp_fortran_file(b"      SUBROUTINE FALLBACK\n      END\n", suffix=".f")
+    units = parse_file(path)
+    assert len(units) == 1
+    assert units[0].end_line == 8  # from item.item.span[1]
+
+
+@patch("fparser.one.parsefortran.FortranParser")
 def test_parse_fixed_form_item_span_and_skips_unknown(mock_parser_cls, tmp_fortran_file):
     """Parser uses item.item.span (105-106); skips unknown block types (95-96)."""
     sub_item = MagicMock()
@@ -387,6 +414,23 @@ def test_parse_fixed_form_unit_has_doc_skips_full_file(mock_parser_cls, tmp_fort
     units = parse_file(path)
     assert len(units) == 1
     assert "HASDOC" in units[0].doc_comments or "work" in units[0].doc_comments
+
+
+def test_get_fparser2_span_empty_content():
+    """_get_fparser2_span returns None when content is empty (line 140)."""
+    node = MagicMock()
+    node.content = []
+    assert _get_fparser2_span(node) is None
+
+
+def test_get_fparser2_span_exception_returns_none():
+    """_get_fparser2_span returns None when span access raises (lines 149-150)."""
+    node = MagicMock()
+    # Item with no .item attribute triggers AttributeError in span extraction
+    class NoSpanItem:
+        pass
+    node.content = [NoSpanItem()]
+    assert _get_fparser2_span(node) is None
 
 
 def test_parse_file_block_none_raises_then_raw_fallback(tmp_fortran_file):

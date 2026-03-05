@@ -41,6 +41,13 @@ class ChunkDetail(BaseModel):
     routine_name: str
     score: float
     match_type: str
+    start_line: int | None = None
+    end_line: int | None = None
+    unit_type: str | None = None
+    chunk_index: int | None = None
+    total_chunks: int | None = None
+    called_routines: list[str] | None = None
+    file_path: str | None = None
 
 
 class TimingDetail(BaseModel):

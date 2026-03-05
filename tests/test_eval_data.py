@@ -6,7 +6,7 @@ from app.eval_data import (
     compute_precision_at_k,
     compute_max_precision_at_k,
     compute_recall_at_k,
-    compute_mrr,
+    compute_reciprocal_rank,
     compute_ndcg_at_k,
     compute_negative_oracle_penalty,
     compute_embedding_similarity,
@@ -82,34 +82,34 @@ def test_max_precision_empty_expected():
 
 
 # ---------------------------------------------------------------------------
-# compute_mrr
+# compute_reciprocal_rank
 # ---------------------------------------------------------------------------
 
 def test_mrr_first_position():
-    assert compute_mrr(["a.f", "b.f", "c.f"], ["a.f"], k=5) == 1.0
+    assert compute_reciprocal_rank(["a.f", "b.f", "c.f"], ["a.f"], k=5) == 1.0
 
 
 def test_mrr_third_position():
-    result = compute_mrr(["x.f", "y.f", "a.f"], ["a.f"], k=5)
+    result = compute_reciprocal_rank(["x.f", "y.f", "a.f"], ["a.f"], k=5)
     assert abs(result - 1 / 3) < 1e-9
 
 
 def test_mrr_not_found():
-    assert compute_mrr(["x.f", "y.f", "z.f"], ["a.f"], k=5) == 0.0
+    assert compute_reciprocal_rank(["x.f", "y.f", "z.f"], ["a.f"], k=5) == 0.0
 
 
 def test_mrr_multiple_relevant():
-    """MRR returns 1/rank of the FIRST relevant result."""
-    result = compute_mrr(["x.f", "a.f", "b.f"], ["a.f", "b.f"], k=5)
+    """RR returns 1/rank of the FIRST relevant result."""
+    result = compute_reciprocal_rank(["x.f", "a.f", "b.f"], ["a.f", "b.f"], k=5)
     assert abs(result - 0.5) < 1e-9
 
 
 def test_mrr_empty_retrieved():
-    assert compute_mrr([], ["a.f"], k=5) == 0.0
+    assert compute_reciprocal_rank([], ["a.f"], k=5) == 0.0
 
 
 def test_mrr_empty_expected():
-    assert compute_mrr(["a.f", "b.f"], [], k=5) == 0.0
+    assert compute_reciprocal_rank(["a.f", "b.f"], [], k=5) == 0.0
 
 
 # ---------------------------------------------------------------------------

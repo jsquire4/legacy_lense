@@ -335,17 +335,19 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate, mock_embed):
     mock_generate.return_value = make_generate_result(
         answer=(
             "DGESV solves a linear system of equations using LU factorization with partial pivoting. "
-            "It calls DGETRF and DGETRS for the factorization and back-substitution steps. "
+            "It calls DGETRF and DGETRS for the factorization steps. DGETRF calls DGETRF2 for panels "
+            "and uses DLASWP for row swaps, DGEMM and DTRSM for updates. "
             "The singular bidiagonal decomposition is computed via DGESVD with JOBU parameter. "
-            "DGEMM performs matrix multiply with alpha and transpose options. "
-            "The pivot selection uses blocked algorithms. DLANGE computes the Frobenius norm of a matrix. "
+            "DGEMM performs matrix op(A)*op(B) with alpha and TRANSA options as a Level 3 BLAS routine. "
+            "LSAME checks character arguments. The pivot selection uses loop structures. "
+            "DLANGE computes the Frobenius norm of a matrix. "
             "Cholesky factorization for symmetric positive definite matrices is done by DPOTRF. "
-            "DGELS solves least squares problems using QR factorization and orthogonal transformations. "
-            "Error checking validates INFO and XERBLA handles dimension and LDA constraints. "
+            "DGELS solves least squares problems using QR factorization, DGEQRF, DTRTRS, "
+            "and orthogonal transformations. "
+            "INFO and XERBLA handle dimension and LDA constraints. "
             "Workspace query via LWORK returns optimal workspace size. "
-            "Loop and block and cache optimizations improve BLAS performance. "
-            "The driver routines handle substitution and validation of singular systems. "
-            "IDAMAX selects pivots. This routine does not exist in LAPACK source."
+            "DGESV is impacted when LU factorization changes. Level 3 BLAS routines like DTRSM "
+            "solve triangular systems. This routine does not exist in LAPACK source."
         ),
         citations=["dgesv.f:1-50"],
     )

@@ -143,6 +143,13 @@ def _build_chunk_details(chunks: list[dict]) -> list[ChunkDetail]:
             routine_name=meta.get("unit_name", ""),
             score=round(chunk.get("score", 0.0), 4),
             match_type=chunk.get("_match_type", "vector"),
+            start_line=meta.get("start_line"),
+            end_line=meta.get("end_line"),
+            unit_type=meta.get("unit_type"),
+            chunk_index=meta.get("chunk_index"),
+            total_chunks=meta.get("total_chunks"),
+            called_routines=meta.get("called_routines"),
+            file_path=file_path or None,
         ))
     return details
 
@@ -445,6 +452,7 @@ async def create_trial_endpoint(req: TrialRequest):
         "ingestion_time_sec": req.ingestion_time_sec,
         "chunks_ingested": req.chunks_ingested,
         "files_processed": req.files_processed,
+        "coverage_pct": req.coverage_pct,
         "avg_mrr": req.avg_mrr,
         "avg_ndcg_at_5": req.avg_ndcg_at_5,
         "negative_oracle_pass_rate": req.negative_oracle_pass_rate,

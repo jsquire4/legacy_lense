@@ -12,7 +12,7 @@ from app.eval_data import (
     compute_recall_at_k,
     compute_precision_at_k,
     compute_max_precision_at_k,
-    compute_mrr,
+    compute_reciprocal_rank,
     compute_ndcg_at_k,
     compute_negative_oracle_penalty,
     check_e2e_result,
@@ -75,7 +75,7 @@ async def eval_stream_generator(model: str | None = None, embedding_model: str |
             recall_5 = compute_recall_at_k(retrieved_files, expected, k=5)
             precision_5 = compute_precision_at_k(retrieved_files, expected, k=5)
             max_precision_5 = compute_max_precision_at_k(expected, k=5)
-            mrr = compute_mrr(retrieved_files, expected, k=5)
+            mrr = compute_reciprocal_rank(retrieved_files, expected, k=5)
             ndcg_5 = compute_ndcg_at_k(retrieved_files, expected, k=5)
             neg_oracle = compute_negative_oracle_penalty(retrieved_files, expected, k=5)
             return {

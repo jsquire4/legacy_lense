@@ -64,9 +64,9 @@ async def run_eval(embedding_model: str | None = None, collection_name: str | No
         })
 
     n = len(EVAL_QUERIES)
-    avg_p5 = total_p5 / n
-    avg_r5 = total_r5 / n
-    avg_latency = total_latency / n
+    avg_p5 = total_p5 / n if n else 0.0
+    avg_r5 = total_r5 / n if n else 0.0
+    avg_latency = total_latency / n if n else 0.0
 
     print("-" * 120)
     print(f"{'AVERAGE':<50} {avg_p5:>6.2f} {avg_r5:>6.2f} {avg_latency:>8.0f}ms")

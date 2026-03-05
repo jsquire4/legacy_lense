@@ -178,7 +178,7 @@ E2E_EVAL_QUERIES = [
         "capability": None,
         "expected_files": ["dgemm.f"],
         "golden_answer": "DGEMM performs one of the double-precision matrix-matrix operations C := alpha*op(A)*op(B) + beta*C, where op(X) is X or X^T. It is a Level 3 BLAS routine and the computational backbone of most LAPACK factorizations.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["matrix", "multiply", "alpha"]},
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["matrix", "alpha", "Level 3"]},
     },
 
     # === Explain Code ===
@@ -186,8 +186,8 @@ E2E_EVAL_QUERIES = [
         "query": "Explain the algorithm in DGETRF step by step",
         "capability": "explain_code",
         "expected_files": ["dgetrf.f", "dgetrf2.f"],
-        "golden_answer": "DGETRF computes the LU factorization of a general M-by-N matrix using partial pivoting with row interchanges. It uses a blocked algorithm: find the pivot in the current column, swap rows via DLASWP, compute the column multipliers, then update the trailing submatrix using DGEMM.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["pivot", "factorization", "blocked"]},
+        "golden_answer": "DGETRF computes the LU factorization of a general M-by-N matrix using partial pivoting with row interchanges. It uses a blocked algorithm: find the pivot in the current column, swap rows via DLASWP, then update the trailing submatrix using DGEMM and DTRSM.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["pivot", "LU", "DLASWP"]},
     },
     {
         "query": "Explain what DLANGE computes and how",
@@ -200,8 +200,8 @@ E2E_EVAL_QUERIES = [
         "query": "Explain the DGEMM matrix multiplication algorithm",
         "capability": "explain_code",
         "expected_files": ["dgemm.f"],
-        "golden_answer": "DGEMM implements C := alpha*op(A)*op(B) + beta*C using a three-nested-loop structure with blocking for cache performance. It handles transpose options via the TRANSA/TRANSB parameters and includes early exits when alpha is zero.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["matrix", "alpha", "transpose"]},
+        "golden_answer": "DGEMM implements C := alpha*op(A)*op(B) + beta*C where op(X) is X or X^T. It handles transpose options via the TRANSA/TRANSB parameters and includes early exits when alpha is zero or beta is one.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["alpha", "TRANSA", "op"]},
     },
 
     # === Generate Docs ===
@@ -232,8 +232,8 @@ E2E_EVAL_QUERIES = [
         "query": "What programming patterns are used in DGESV?",
         "capability": "detect_patterns",
         "expected_files": ["dgesv.f"],
-        "golden_answer": "DGESV uses input validation with INFO error codes, delegates to DGETRF for factorization and DGETRS for solving, and follows the LAPACK convention of in-place computation. Error checking validates N>=0, NRHS>=0, and LDA>=max(1,N).",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["error", "INFO", "validation"]},
+        "golden_answer": "DGESV uses input parameter checking with INFO return codes, delegates to DGETRF for factorization and DGETRS for solving, and follows the LAPACK convention of in-place computation. Parameter checking validates N>=0, NRHS>=0, and LDA>=max(1,N).",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["INFO", "DGETRF", "DGETRS"]},
     },
     {
         "query": "Identify workspace query patterns in DSYEV",
@@ -246,8 +246,8 @@ E2E_EVAL_QUERIES = [
         "query": "Detect loop and blocking patterns in DGEMM",
         "capability": "detect_patterns",
         "expected_files": ["dgemm.f"],
-        "golden_answer": "DGEMM uses three nested loops over matrix dimensions with early-exit optimizations when alpha=0. The inner loops are structured for cache-friendly access patterns, and the routine handles six transpose combinations via conditional branching.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["loop", "block", "cache"]},
+        "golden_answer": "DGEMM uses nested loops over matrix dimensions with early-exit optimizations when alpha is zero. It handles transpose combinations (NOTA, CONJA, etc.) via conditional branching, and calls XERBLA for parameter errors. The LSAME function is used to check character arguments.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["loop", "alpha", "LSAME"]},
     },
 
     # === Map Dependencies ===
@@ -255,22 +255,22 @@ E2E_EVAL_QUERIES = [
         "query": "What routines does DGESV call?",
         "capability": "map_dependencies",
         "expected_files": ["dgesv.f", "dgetrf.f", "dgetrs.f"],
-        "golden_answer": "DGESV calls DGETRF to compute the LU factorization with partial pivoting, then calls DGETRS to solve the triangular systems. DGETRF in turn depends on BLAS routines DGEMM, DTRSM, DLASWP, and IDAMAX.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGETRF", "DGETRS", "factorization"]},
+        "golden_answer": "DGESV calls DGETRF to compute the LU factorization with partial pivoting, then calls DGETRS to solve the triangular systems. DGETRF in turn calls DGETRF2 for panel factorization and uses DGEMM and DTRSM for blocked updates.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGETRF", "DGETRS", "LU"]},
     },
     {
         "query": "What BLAS routines does DGETRF depend on?",
         "capability": "map_dependencies",
         "expected_files": ["dgetrf.f", "dgetrf2.f"],
-        "golden_answer": "DGETRF depends on BLAS Level 3 routines DGEMM (matrix multiply) and DTRSM (triangular solve) for the blocked algorithm, plus DLASWP for row interchanges and IDAMAX for pivot selection in the panel factorization.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGEMM", "DTRSM", "IDAMAX"]},
+        "golden_answer": "DGETRF depends on DGEMM and DTRSM for the blocked algorithm updates, DLASWP for row interchanges, and calls DGETRF2 for the unblocked panel factorization. DGETRF2 in turn uses IDAMAX for pivot selection and DSCAL/DGER for column updates.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGEMM", "DTRSM", "DGETRF2"]},
     },
     {
         "query": "Map the dependency chain of DGELS",
         "capability": "map_dependencies",
         "expected_files": ["dgels.f"],
-        "golden_answer": "DGELS calls DGEQRF for QR factorization (overdetermined case) or DGELQF for LQ factorization (underdetermined case), then DORMQR/DORMLQ to apply orthogonal transformations, and DTRSM to solve the triangular system.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGEQRF", "DTRSM", "orthogonal"]},
+        "golden_answer": "DGELS calls DGEQRF for QR factorization (overdetermined case) or DGELQF for LQ factorization (underdetermined case), then DORMQR/DORMLQ to apply orthogonal transformations, and DTRTRS to solve the triangular system.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGEQRF", "DTRTRS", "orthogonal"]},
     },
 
     # === Impact Analysis ===
@@ -278,22 +278,22 @@ E2E_EVAL_QUERIES = [
         "query": "What breaks if DGETRF is changed?",
         "capability": "impact_analysis",
         "expected_files": ["dgetrf.f", "dgesv.f"],
-        "golden_answer": "DGETRF is called by DGESV, DGESVX, DGECON, DGETRI, and many other driver routines that require LU factorization. Changes to DGETRF would affect all linear system solvers, condition number estimators, and matrix inverse computations.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGESV", "driver", "factorization"]},
+        "golden_answer": "DGETRF is called by DGESV, DGESVX, DGECON, DGETRI, and many other routines that require LU factorization. Changes to DGETRF would affect all linear system solvers, condition number estimators, and matrix inverse computations.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["DGESV", "LU", "factorization"]},
     },
     {
         "query": "What is the impact of modifying DGEMM?",
         "capability": "impact_analysis",
         "expected_files": ["dgemm.f"],
-        "golden_answer": "DGEMM is the most critical BLAS Level 3 routine — virtually every blocked LAPACK algorithm depends on it for trailing submatrix updates. Modifying DGEMM impacts DGETRF, DPOTRF, DGEQRF, DTRSM, and the performance of the entire library.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["performance", "BLAS", "blocked"]},
+        "golden_answer": "DGEMM is the most critical BLAS Level 3 routine — virtually every LAPACK factorization algorithm depends on it for trailing submatrix updates. Modifying DGEMM impacts DGETRF, DPOTRF, DGEQRF, and the performance of the entire library.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["BLAS", "Level 3", "DGETRF"]},
     },
     {
         "query": "What depends on DTRSM in LAPACK?",
         "capability": "impact_analysis",
         "expected_files": ["dtrsm.f"],
-        "golden_answer": "DTRSM (triangular matrix solve) is used by DGETRS, DGELS, DGETRI, and many factorization routines for back-substitution. It is a Level 3 BLAS routine critical to the performance of all solve operations after factorization.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["triangular", "solve", "substitution"]},
+        "golden_answer": "DTRSM solves triangular matrix equations of the form op(A)*X = alpha*B or X*op(A) = alpha*B. It is a Level 3 BLAS routine used by DGETRF, DGETRS, DGETRI, and many factorization routines for solving triangular systems.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["triangular", "solve", "Level 3"]},
     },
 
     # === Extract Business Rules ===
@@ -301,8 +301,8 @@ E2E_EVAL_QUERIES = [
         "query": "What validation rules does DGESV enforce on its inputs?",
         "capability": "extract_business_rules",
         "expected_files": ["dgesv.f"],
-        "golden_answer": "DGESV validates: N>=0, NRHS>=0, LDA>=max(1,N), LDB>=max(1,N). On violation it sets INFO<0 with the index of the illegal argument. On successful factorization, INFO=0; if the matrix is singular, INFO>0 indicates the diagonal element that is exactly zero.",
-        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["INFO", "validate", "singular"]},
+        "golden_answer": "DGESV checks: N>=0, NRHS>=0, LDA>=max(1,N), LDB>=max(1,N). On violation it sets INFO<0 with the position of the illegal argument and calls XERBLA. On successful factorization, INFO=0; if the matrix is singular, INFO>0 indicates the diagonal element that is exactly zero.",
+        "checks": {"has_citations": True, "min_answer_length": 200, "expected_keywords": ["INFO", "XERBLA", "singular"]},
     },
     {
         "query": "What workspace size rules does DSYEV use?",
@@ -345,7 +345,7 @@ E2E_EVAL_QUERIES = [
         "checks": {"expect_refusal": True, "min_answer_length": 0},
     },
     {
-        "query": "What does DGETRF3 compute?",
+        "query": "What does DLASOR compute?",
         "capability": None,
         "expected_files": [],
         "golden_answer": "",
@@ -404,8 +404,11 @@ def compute_recall_at_k(retrieved_files: list[str], expected_files: list[str], k
     return found / len(expected_files)
 
 
-def compute_mrr(retrieved_files: list[str], expected_files: list[str], k: int = 5) -> float:
-    """Compute Mean Reciprocal Rank: 1/rank of first relevant result in top-K, or 0."""
+def compute_reciprocal_rank(retrieved_files: list[str], expected_files: list[str], k: int = 5) -> float:
+    """Reciprocal Rank: 1/rank of first relevant result in top-K, or 0.
+
+    The mean (MRR) is computed by averaging this value across queries.
+    """
     top_k = retrieved_files[:k]
     for i, f in enumerate(top_k):
         if f in expected_files:

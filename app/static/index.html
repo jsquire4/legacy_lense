@@ -255,8 +255,12 @@
             font-size: 0.72rem; font-weight: 600;
         }
         .chunks-layout {
-            display: flex; gap: 0; border: 1px solid #3e3e3e; border-radius: 6px;
+            display: flex; gap: 0; border: 1px solid #3e3e3e; border-radius: 6px 6px 0 0;
             overflow: hidden; min-height: 260px; max-height: 420px;
+        }
+        .chunks-layout-wrapper .chunks-layout:last-child,
+        .chunks-layout-wrapper:not(:has(.chunk-metadata[style*="flex"])) .chunks-layout {
+            border-radius: 6px;
         }
         .chunks-sidebar {
             width: 240px; min-width: 240px; overflow-y: auto;
@@ -286,6 +290,30 @@
             color: #666; font-style: italic; padding: 2rem; text-align: center;
             display: flex; align-items: center; justify-content: center; height: 100%;
         }
+        .score-pill {
+            display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
+            font-size: 0.72rem; font-weight: 600; font-family: monospace;
+        }
+        .score-high { background: #a6e22e22; color: #a6e22e; }
+        .score-mid  { background: #e6db7422; color: #e6db74; }
+        .score-low  { background: #f9267222; color: #f92672; }
+        .chunk-metadata {
+            display: none; gap: 1rem; padding: 0.5rem 0.75rem;
+            background: #1e1e1e; border: 1px solid #3e3e3e; border-top: none;
+            border-radius: 0 0 6px 6px; font-size: 0.78rem; color: #888;
+            flex-wrap: wrap; align-items: center;
+        }
+        .chunk-metadata span.meta-label { color: #666; margin-right: 0.2rem; }
+        .chunk-metadata span.meta-value { color: #d4d4d4; font-family: monospace; }
+        .gh-btn {
+            display: inline-flex; align-items: center; gap: 0.3rem;
+            padding: 0.25rem 0.6rem; border-radius: 4px;
+            background: #333; border: 1px solid #3e3e3e;
+            color: #66d9ef; font-size: 0.75rem; font-weight: 600;
+            text-decoration: none; transition: all 0.15s; cursor: pointer;
+        }
+        .gh-btn:hover { background: #3e3e3e; border-color: #66d9ef; color: #fff; }
+        .gh-btn svg { width: 14px; height: 14px; fill: currentColor; }
         .badge-name { background: #66d9ef22; color: #66d9ef; }
         .badge-expansion { background: #ae81ff22; color: #ae81ff; }
         .badge-call-graph { background: #fd971f22; color: #fd971f; }
@@ -527,11 +555,14 @@
                     <div class="expansion-names" id="obs-expansion"></div>
                 </div>
                 <h4>Retrieved Chunks</h4>
-                <div class="chunks-layout">
-                    <div class="chunks-sidebar" id="obs-chunks"></div>
-                    <div class="chunk-viewer" id="chunk-viewer">
-                        <div class="chunk-viewer-placeholder">Select a chunk to view source</div>
+                <div class="chunks-layout-wrapper">
+                    <div class="chunks-layout">
+                        <div class="chunks-sidebar" id="obs-chunks"></div>
+                        <div class="chunk-viewer" id="chunk-viewer">
+                            <div class="chunk-viewer-placeholder">Select a chunk to view source</div>
+                        </div>
                     </div>
+                    <div class="chunk-metadata" id="chunk-metadata"></div>
                 </div>
             </div>
         </div>
@@ -738,11 +769,12 @@
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitQuery(); }
         });
 
-        function addLineNumbers(el) {
+        function addLineNumbers(el, startLine) {
+            startLine = startLine || 1;
             const lines = el.innerHTML.split('\n');
-            const pad = String(lines.length).length;
+            const pad = String(startLine + lines.length - 1).length;
             el.innerHTML = lines.map((line, i) => {
-                const num = String(i + 1).padStart(pad, ' ');
+                const num = String(startLine + i).padStart(pad, ' ');
                 return `<span class="hljs-ln-numbers">${num}</span>${line}`;
             }).join('\n');
         }
@@ -871,6 +903,8 @@
             const viewer = document.getElementById("chunk-viewer");
             sidebar.innerHTML = "";
 
+            const metaPanel = document.getElementById("chunk-metadata");
+
             function selectChunk(chunk, item) {
                 sidebar.querySelectorAll(".chunk-item").forEach(el => el.classList.remove("active"));
                 item.classList.add("active");
@@ -882,13 +916,41 @@
                 pre.appendChild(code);
                 viewer.appendChild(pre);
                 hljs.highlightElement(code);
-                addLineNumbers(code);
+                addLineNumbers(code, chunk.start_line);
+
+                // Metadata panel
+                const parts = [];
+                if (chunk.unit_type) parts.push(`<span class="meta-label">Type:</span> <span class="meta-value">${escHtml(chunk.unit_type)}</span>`);
+                if (chunk.total_chunks != null && chunk.total_chunks > 1 && chunk.chunk_index != null) parts.push(`<span class="meta-label">Chunk:</span> <span class="meta-value">${chunk.chunk_index + 1} of ${chunk.total_chunks}</span>`);
+                if (chunk.called_routines && chunk.called_routines.length > 0) parts.push(`<span class="meta-label">Calls:</span> <span class="meta-value">${chunk.called_routines.map(r => escHtml(r)).join(", ")}</span>`);
+                const ghUrl = githubUrl(chunk);
+                if (ghUrl) parts.push(`<a href="${ghUrl}" target="_blank" rel="noopener" class="gh-btn" style="margin-left:auto"><svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>View on GitHub</a>`);
+                if (parts.length > 0) {
+                    metaPanel.innerHTML = parts.join('<span style="color:#3e3e3e">|</span>');
+                    metaPanel.style.display = "flex";
+                } else {
+                    metaPanel.style.display = "none";
+                }
+            }
+
+            function scoreClass(s) { return s >= 0.85 ? "score-high" : s >= 0.70 ? "score-mid" : "score-low"; }
+
+            function githubUrl(chunk) {
+                if (!chunk.file_path) return null;
+                const repoPath = chunk.file_path.replace(/^data\/lapack\//, "");
+                let url = "https://github.com/Reference-LAPACK/lapack/blob/master/" + encodeURI(repoPath);
+                if (chunk.start_line != null) url += "#L" + chunk.start_line + (chunk.end_line != null ? "-L" + chunk.end_line : "");
+                return url;
             }
 
             chunks.forEach((c, i) => {
                 const item = document.createElement("div");
                 item.className = "chunk-item";
-                item.innerHTML = `<span class="chunk-file"><span class="chunk-rank">#${c.rank}</span>${escHtml(c.file_name)}</span><div class="chunk-meta"><span style="font-family:monospace">${escHtml(c.routine_name)}</span><span>${c.score.toFixed(4)}</span><span class="badge ${badgeClass(c.match_type)}">${escHtml(c.match_type)}</span></div>`;
+                const lineRange = (c.start_line != null && c.end_line != null) ? `:${c.start_line}-${c.end_line}` : "";
+                const fileLabel = escHtml(c.file_name) + escHtml(lineRange);
+                const ghLink = githubUrl(c);
+                const ghIcon = ghLink ? ` <a href="${ghLink}" target="_blank" rel="noopener" title="View on GitHub" class="gh-btn" style="padding:0.1rem 0.35rem;font-size:0.65rem;margin-left:0.3rem" onclick="event.stopPropagation()"><svg viewBox="0 0 16 16" style="width:11px;height:11px"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a>` : "";
+                item.innerHTML = `<span class="chunk-file"><span class="chunk-rank">#${c.rank}</span>${fileLabel}${ghIcon}</span><div class="chunk-meta"><span style="font-family:monospace">${escHtml(c.routine_name)}</span><span class="score-pill ${scoreClass(c.score)}">${c.score.toFixed(4)}</span><span class="badge ${badgeClass(c.match_type)}">${escHtml(c.match_type)}</span></div>`;
                 item.addEventListener("click", () => selectChunk(c, item));
                 sidebar.appendChild(item);
                 if (i === 0) selectChunk(c, item);

@@ -39,6 +39,13 @@ _MIGRATIONS = [
     ("ingestion_time_sec", "ALTER TABLE trials ADD COLUMN ingestion_time_sec REAL"),
     ("chunks_ingested", "ALTER TABLE trials ADD COLUMN chunks_ingested INTEGER"),
     ("files_processed", "ALTER TABLE trials ADD COLUMN files_processed INTEGER"),
+    ("coverage_pct", "ALTER TABLE trials ADD COLUMN coverage_pct REAL"),
+    ("avg_mrr", "ALTER TABLE trials ADD COLUMN avg_mrr REAL"),
+    ("avg_ndcg_at_5", "ALTER TABLE trials ADD COLUMN avg_ndcg_at_5 REAL"),
+    ("negative_oracle_pass_rate", "ALTER TABLE trials ADD COLUMN negative_oracle_pass_rate REAL"),
+    ("avg_similarity", "ALTER TABLE trials ADD COLUMN avg_similarity REAL"),
+    ("hallucination_probe_pass_rate", "ALTER TABLE trials ADD COLUMN hallucination_probe_pass_rate REAL"),
+    ("citation_fallback_count", "ALTER TABLE trials ADD COLUMN citation_fallback_count INTEGER"),
 ]
 
 
@@ -67,8 +74,11 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
                (created_at, model, eval_type, avg_recall_at_5, avg_precision_at_5, pass_rate,
                 avg_retrieval_latency_ms, avg_e2e_latency_ms, total_queries,
                 input_cost_per_1m, output_cost_per_1m, embedding_model, embedding_dimensions,
-                ingestion_time_sec, chunks_ingested, files_processed, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                ingestion_time_sec, chunks_ingested, files_processed, coverage_pct,
+                avg_mrr, avg_ndcg_at_5, negative_oracle_pass_rate,
+                avg_similarity, hallucination_probe_pass_rate, citation_fallback_count,
+                notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("created_at", datetime.now(timezone.utc).isoformat()),
                 data["model"],
@@ -86,6 +96,13 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
                 data.get("ingestion_time_sec"),
                 data.get("chunks_ingested"),
                 data.get("files_processed"),
+                data.get("coverage_pct"),
+                data.get("avg_mrr"),
+                data.get("avg_ndcg_at_5"),
+                data.get("negative_oracle_pass_rate"),
+                data.get("avg_similarity"),
+                data.get("hallucination_probe_pass_rate"),
+                data.get("citation_fallback_count"),
                 data.get("notes", ""),
             ),
         )

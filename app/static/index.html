@@ -107,7 +107,7 @@
         }
         h1 span { color: #a6e22e; }
         .subtitle { color: #888; margin-bottom: 1.75rem; font-size: 0.9rem; text-align: center; letter-spacing: 0.02em; }
-        .container { width: 100%; max-width: 920px; margin: 0 auto; }
+        .container { width: 100%; max-width: 1200px; margin: 0 auto; }
 
         /* Panels */
         .panel {
@@ -316,7 +316,7 @@
         /* Eval accordion rows */
         .eval-item { border-bottom: 1px solid #333; }
         .eval-header {
-            display: grid; grid-template-columns: auto 1fr auto auto auto;
+            display: grid; grid-template-columns: auto 1fr auto auto auto auto auto;
             gap: 0.5rem; padding: 0.5rem 0.25rem; font-size: 0.78rem;
             align-items: center; cursor: pointer; user-select: none;
         }
@@ -372,6 +372,36 @@
         }
         .check-item.check-pass { background: rgba(166,226,46,0.12); color: #a6e22e; }
         .check-item.check-fail { background: rgba(249,38,114,0.12); color: #f92672; }
+
+        /* Difficulty badges */
+        .diff-badge {
+            font-size: 0.62rem; padding: 0.08rem 0.3rem; border-radius: 3px;
+            font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+        }
+        .diff-easy { background: #a6e22e22; color: #a6e22e; }
+        .diff-medium { background: #e6db7422; color: #e6db74; }
+        .diff-hard { background: #f9267222; color: #f92672; }
+        .diff-unknown { background: #88888822; color: #888; }
+
+        /* Difficulty breakdown table */
+        .diff-breakdown { margin-top: 0.5rem; font-size: 0.78rem; }
+        .diff-breakdown table { width: 100%; border-collapse: collapse; }
+        .diff-breakdown th, .diff-breakdown td {
+            padding: 0.25rem 0.5rem; text-align: right; border-bottom: 1px solid #333;
+        }
+        .diff-breakdown th { color: #888; font-size: 0.72rem; text-transform: uppercase; font-weight: 600; }
+        .diff-breakdown td:first-child, .diff-breakdown th:first-child { text-align: left; }
+
+        /* Hallucination probe badge */
+        .probe-badge {
+            font-size: 0.62rem; padding: 0.08rem 0.3rem; border-radius: 3px;
+            font-weight: 700; background: #ae81ff22; color: #ae81ff; white-space: nowrap;
+        }
+        /* Citation fallback badge */
+        .fallback-badge {
+            font-size: 0.62rem; padding: 0.08rem 0.3rem; border-radius: 3px;
+            font-weight: 700; background: #fd971f22; color: #fd971f; white-space: nowrap;
+        }
 
         /* Model selector */
         .model-select {
@@ -523,8 +553,8 @@
             </div>
             <div class="trial-scroll">
                 <table class="trial-table" id="ingest-trials-table">
-                    <thead><tr><th>Embedding Model</th><th>Dimensions</th><th>Time</th><th>Chunks</th><th>Files</th><th>Chunks/sec</th><th></th></tr></thead>
-                    <tbody id="ingest-trials-body"><tr><td colspan="7" style="color:#555">No ingestion trials yet</td></tr></tbody>
+                    <thead><tr><th>Embedding Model</th><th>Dimensions</th><th>Time</th><th>Chunks</th><th>Files</th><th>Coverage</th><th>Chunks/sec</th><th></th></tr></thead>
+                    <tbody id="ingest-trials-body"><tr><td colspan="8" style="color:#555">No ingestion trials yet</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -541,8 +571,17 @@
                 <div class="obs-stats">
                     <div class="stat"><span class="stat-value" id="eval-precision">—</span><span>Precision@5</span></div>
                     <div class="stat"><span class="stat-value" id="eval-recall">—</span><span>Recall@5</span></div>
+                    <div class="stat"><span class="stat-value" id="eval-mrr">—</span><span>MRR</span></div>
+                    <div class="stat"><span class="stat-value" id="eval-ndcg">—</span><span>NDCG@5</span></div>
+                    <div class="stat"><span class="stat-value" id="eval-neg-oracle">—</span><span>Neg Oracle</span></div>
                     <div class="stat"><span class="stat-value" id="eval-latency">—</span><span>Avg Latency</span></div>
                     <div class="stat"><span class="stat-value" id="eval-progress">—</span><span>Queries</span></div>
+                </div>
+                <div class="diff-breakdown" id="eval-diff-breakdown" style="display:none">
+                    <table>
+                        <thead><tr><th>Difficulty</th><th>Count</th><th>Avg R@5</th><th>Avg MRR</th></tr></thead>
+                        <tbody id="eval-diff-body"></tbody>
+                    </table>
                 </div>
             </div>
             <div class="eval-rows" id="eval-rows"></div>
@@ -553,8 +592,8 @@
             <h2 class="panel-title">Retrieval Trial History</h2>
             <div class="trial-scroll">
                 <table class="trial-table" id="ret-trials-table">
-                    <thead><tr><th>Embedding Model</th><th>Dimensions</th><th>P@5</th><th>R@5</th><th>Avg Latency</th><th>Queries</th><th></th></tr></thead>
-                    <tbody id="ret-trials-body"><tr><td colspan="7" style="color:#555">No retrieval trials yet</td></tr></tbody>
+                    <thead><tr><th>Embedding Model</th><th>Dims</th><th>P@5</th><th>R@5</th><th>MRR</th><th>NDCG@5</th><th>Neg Oracle</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
+                    <tbody id="ret-trials-body"><tr><td colspan="10" style="color:#555">No retrieval trials yet</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -571,6 +610,9 @@
             <div class="eval-metrics" id="e2e-metrics" style="display:none">
                 <div class="obs-stats">
                     <div class="stat"><span class="stat-value" id="e2e-pass-rate">—</span><span>Pass Rate</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-similarity">—</span><span>Avg Similarity</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-halluc-rate">—</span><span>Halluc. Pass</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-fallbacks">—</span><span>Cite Fallbacks</span></div>
                     <div class="stat"><span class="stat-value" id="e2e-latency">—</span><span>Avg Latency</span></div>
                     <div class="stat"><span class="stat-value" id="e2e-progress">—</span><span>Queries</span></div>
                 </div>
@@ -583,8 +625,8 @@
             <h2 class="panel-title">E2E Trial History <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
             <div class="trial-scroll">
                 <table class="trial-table" id="trials-table">
-                    <thead><tr><th>Model</th><th>Input $/1M</th><th>Output $/1M</th><th>Pass Rate</th><th>E2E Latency</th><th>E2E Runs</th><th></th></tr></thead>
-                    <tbody id="trials-body"><tr><td colspan="7" style="color:#555">Loading models...</td></tr></tbody>
+                    <thead><tr><th>Embed Model</th><th>LLM</th><th>Pass Rate</th><th>Avg Sim</th><th>Halluc.</th><th>Fallbacks</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
+                    <tbody id="trials-body"><tr><td colspan="9" style="color:#555">No E2E trials yet</td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -651,7 +693,7 @@
         let selectedCapability = "";
         let queryModel = "";
         let e2eModel = "";
-        const _CACHED_MODELS = new Set(["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano", "gemini-2.0-flash", "gemini-2.5-flash"]);
+        const _CACHED_MODELS = new Set(["gpt-4.1-nano", "gpt-4o-mini", "gpt-5-nano", "gemini-2.5-flash"]);
         let retAvgLatency = JSON.parse(localStorage.getItem("retAvgLatency"));
         let retAvgRecall = JSON.parse(localStorage.getItem("retAvgRecall"));
         let retRunCount = JSON.parse(localStorage.getItem("retRunCount")) || 0;
@@ -898,30 +940,54 @@
         }
 
         // --- Retrieval eval row builder ---
+        function diffBadge(d) {
+            const cls = d === "easy" ? "diff-easy" : d === "medium" ? "diff-medium" : d === "hard" ? "diff-hard" : "diff-unknown";
+            return `<span class="diff-badge ${cls}">${escHtml(d || "?")}</span>`;
+        }
+
         function buildRetrievalRow(data) {
             const item = document.createElement("div");
             item.className = "eval-item";
             const capClass = data.capability ? "" : " cap-null";
             const passClass = data.recall_at_5 >= 0.7 ? "pass" : "fail";
             const p5 = data.precision_at_5 != null ? data.precision_at_5.toFixed(2) : "--";
+            const maxP5 = data.max_precision_at_5 != null ? data.max_precision_at_5.toFixed(2) : null;
+            const p5Pct = (data.precision_at_5 != null && data.max_precision_at_5 > 0) ? Math.round((data.precision_at_5 / data.max_precision_at_5) * 100) : 0;
+            const p5Display = maxP5 ? `${p5Pct}% (${p5}/${maxP5})` : p5;
+            const p5Perfect = data.precision_at_5 != null && data.max_precision_at_5 != null && data.precision_at_5 >= data.max_precision_at_5 - 0.001;
+            const mrr = data.mrr != null ? data.mrr.toFixed(2) : "--";
+            const ndcg = data.ndcg_at_5 != null ? data.ndcg_at_5.toFixed(2) : "--";
+            const negOracle = data.negative_oracle_pass != null ? (data.negative_oracle_pass ? "OK" : "FAIL") : "--";
+            const negOracleClass = data.negative_oracle_pass ? "pass" : "fail";
 
             // Build file comparison
             const expected = new Set(data.expected_files || []);
             const retrieved = data.retrieved_files || [];
             const foundFiles = retrieved.filter(f => expected.has(f));
-            const missingFiles = [...expected].filter(f => !retrieved.includes(f));
-            const extraFiles = retrieved.filter(f => !expected.has(f));
 
             item.innerHTML = `
                 <div class="eval-header" onclick="this.parentElement.classList.toggle('expanded')">
                     <span class="eval-chevron">&#9654;</span>
                     <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
+                    ${diffBadge(data.difficulty)}
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
-                    <span class="eval-score" style="color:#66d9ef" title="P@5">${p5}</span>
+                    <span class="eval-score ${p5Perfect ? 'pass' : ''}" style="${p5Perfect ? '' : 'color:#66d9ef'}" title="P@5 (actual/max)">${p5Display}</span>
                     <span class="eval-score ${passClass}" title="R@5">${data.recall_at_5.toFixed(2)}</span>
                     <span class="eval-ms">${fmtSec(data.latency_ms)}</span>
                 </div>
                 <div class="eval-details">
+                    <div class="detail-section">
+                        <div class="detail-label">Metrics</div>
+                        <div class="check-list">
+                            <span class="check-item" style="background:#66d9ef22;color:#66d9ef">MRR: ${mrr}</span>
+                            <span class="check-item" style="background:#66d9ef22;color:#66d9ef">NDCG@5: ${ndcg}</span>
+                            <span class="check-item ${negOracleClass === 'pass' ? 'check-pass' : 'check-fail'}">Neg Oracle: ${negOracle}</span>
+                            <span class="check-item" style="background:#33333399;color:#aaa">P@1: ${data.precision_at_1 != null ? data.precision_at_1.toFixed(2) : "--"}</span>
+                            <span class="check-item" style="background:#33333399;color:#aaa">P@3: ${data.precision_at_3 != null ? data.precision_at_3.toFixed(2) : "--"}</span>
+                            <span class="check-item" style="background:#33333399;color:#aaa">R@1: ${data.recall_at_1 != null ? data.recall_at_1.toFixed(2) : "--"}</span>
+                            <span class="check-item" style="background:#33333399;color:#aaa">R@3: ${data.recall_at_3 != null ? data.recall_at_3.toFixed(2) : "--"}</span>
+                        </div>
+                    </div>
                     <div class="detail-section">
                         <div class="detail-label">Expected Files</div>
                         <div class="file-list">
@@ -949,26 +1015,48 @@
             const capClass = data.capability ? "" : " cap-null";
             const passClass = data.passed ? "pass" : "fail";
             const checks = data.checks || {};
+            const isProbe = data.is_hallucination_probe || false;
+            const isFallback = data.citation_is_fallback || false;
 
             const checkItems = [];
-            if ("has_citations" in checks)
-                checkItems.push(`<span class="check-item ${checks.has_citations ? "check-pass" : "check-fail"}">citations: ${checks.has_citations ? "yes" : "no"}</span>`);
-            if ("min_answer_length" in checks)
-                checkItems.push(`<span class="check-item ${checks.min_answer_length ? "check-pass" : "check-fail"}">length: ${data.answer_length} chars</span>`);
-            if ("keywords_pass" in checks) {
-                const found = escHtml((checks.keywords_found || []).join(", ") || "none");
-                checkItems.push(`<span class="check-item ${checks.keywords_pass ? "check-pass" : "check-fail"}">keywords: ${found}</span>`);
+            if (isProbe) {
+                const probePass = checks.expect_refusal_pass;
+                checkItems.push(`<span class="check-item ${probePass ? "check-pass" : "check-fail"}">refusal: ${probePass ? "detected" : "MISSED"}</span>`);
+            } else {
+                if ("has_citations" in checks)
+                    checkItems.push(`<span class="check-item ${checks.has_citations ? "check-pass" : "check-fail"}">citations: ${checks.has_citations ? "yes" : "no"}</span>`);
+                if ("min_answer_length" in checks)
+                    checkItems.push(`<span class="check-item ${checks.min_answer_length ? "check-pass" : "check-fail"}">length: ${data.answer_length} chars</span>`);
+                if ("keywords_pass" in checks) {
+                    const found = escHtml((checks.keywords_found || []).join(", ") || "none");
+                    checkItems.push(`<span class="check-item ${checks.keywords_pass ? "check-pass" : "check-fail"}">keywords: ${found}</span>`);
+                }
+                if ("similarity_pass" in checks) {
+                    const sim = checks.similarity_score != null ? checks.similarity_score.toFixed(3) : "--";
+                    checkItems.push(`<span class="check-item ${checks.similarity_pass ? "check-pass" : "check-fail"}">similarity: ${sim}</span>`);
+                }
+                if ("citation_relevant" in checks) {
+                    checkItems.push(`<span class="check-item ${checks.citation_relevant ? "check-pass" : "check-fail"}">cite relevant: ${checks.citation_relevant ? "yes" : "no"}</span>`);
+                }
+                if (isFallback) {
+                    checkItems.push(`<span class="check-item" style="background:#fd971f22;color:#fd971f">cite fallback</span>`);
+                }
             }
 
             const citations = (data.citations || []).map(c => `<span class="file-tag retrieved">${escHtml(c)}</span>`).join("");
             const preview = escHtml(data.answer_preview || "");
 
+            // Extra badges for header
+            const probeBadge = isProbe ? ' <span class="probe-badge">PROBE</span>' : '';
+            const fallbackBadge = isFallback ? ' <span class="fallback-badge">FALLBACK</span>' : '';
+            const simScore = data.similarity_score != null ? ` <span style="color:#66d9ef;font-family:monospace;font-size:0.72rem" title="Similarity">${data.similarity_score.toFixed(2)}</span>` : '';
+
             item.innerHTML = `
                 <div class="eval-header" onclick="this.parentElement.classList.toggle('expanded')">
                     <span class="eval-chevron">&#9654;</span>
-                    <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}</span>
+                    <span class="eval-q" title="${escHtml(data.query)}">${escHtml(data.query)}${probeBadge}</span>
                     <span class="eval-cap${capClass}">${capLabel(data.capability)}</span>
-                    <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>
+                    <span class="eval-score ${passClass}">${data.passed ? "PASS" : "FAIL"}</span>${simScore}${fallbackBadge}
                     <span class="eval-ms">${fmtSec(data.latency_ms)}${data.ttft_ms != null ? ` <span style="color:#66d9ef">ttft ${fmtSec(data.ttft_ms)}</span>` : ""}</span>
                 </div>
                 <div class="eval-details">
@@ -1118,12 +1206,18 @@
         async function runEvals() {
             const precisionEl = document.getElementById("eval-precision");
             const recallEl = document.getElementById("eval-recall");
+            const mrrEl = document.getElementById("eval-mrr");
+            const ndcgEl = document.getElementById("eval-ndcg");
+            const negOracleEl = document.getElementById("eval-neg-oracle");
             const latencyEl = document.getElementById("eval-latency");
             const progressEl = document.getElementById("eval-progress");
             precisionEl.textContent = "—"; recallEl.textContent = "—";
+            mrrEl.textContent = "—"; ndcgEl.textContent = "—"; negOracleEl.textContent = "—";
             latencyEl.textContent = "—"; progressEl.textContent = "—";
+            document.getElementById("eval-diff-breakdown").style.display = "none";
 
-            let runningPrecision = 0, runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
+            let runningPrecision = 0, runningMaxPrecision = 0, runningRecall = 0, runningLatency = 0, completed = 0, total = 0;
+            let runningMrr = 0, runningNdcg = 0, runningNegOracle = 0;
             const retEmbModel = document.getElementById("ret-model-select").value || "";
             let url = "/api/eval/stream";
             if (retEmbModel) url += `?embedding_model=${encodeURIComponent(retEmbModel)}`;
@@ -1133,21 +1227,51 @@
                 onProgress(data, rowsDiv) {
                     completed++;
                     runningPrecision += (data.precision_at_5 || 0);
+                    runningMaxPrecision += (data.max_precision_at_5 || 0);
                     runningRecall += data.recall_at_5;
                     runningLatency += data.latency_ms;
-                    precisionEl.textContent = (runningPrecision / completed).toFixed(3);
+                    runningMrr += (data.mrr || 0);
+                    runningNdcg += (data.ndcg_at_5 || 0);
+                    if (data.negative_oracle_pass) runningNegOracle++;
+                    const avgP = runningPrecision / completed;
+                    const avgMP = runningMaxPrecision / completed;
+                    const pPct = avgMP > 0 ? Math.round((avgP / avgMP) * 100) : 0;
+                    precisionEl.textContent = `${pPct}% (${avgP.toFixed(3)}/${avgMP.toFixed(3)})`;
                     recallEl.textContent = (runningRecall / completed).toFixed(3);
+                    mrrEl.textContent = (runningMrr / completed).toFixed(3);
+                    ndcgEl.textContent = (runningNdcg / completed).toFixed(3);
+                    negOracleEl.textContent = ((runningNegOracle / completed) * 100).toFixed(0) + "%";
                     latencyEl.textContent = fmtSec(runningLatency / completed);
                     progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
                     rowsDiv.appendChild(buildRetrievalRow(data));
                 },
                 onSummary(data, statusEl) {
                     total = data.total_queries;
-                    precisionEl.textContent = (data.avg_precision_at_5 || 0).toFixed(3);
+                    const avgP5 = data.avg_precision_at_5 || 0;
+                    const avgMaxP5 = data.avg_max_precision_at_5 || 0;
+                    const sumPct = avgMaxP5 > 0 ? Math.round((avgP5 / avgMaxP5) * 100) : 0;
+                    precisionEl.textContent = avgMaxP5 ? `${sumPct}% (${avgP5.toFixed(3)}/${avgMaxP5.toFixed(3)})` : avgP5.toFixed(3);
                     recallEl.textContent = data.avg_recall_at_5.toFixed(3);
+                    mrrEl.textContent = (data.avg_mrr || 0).toFixed(3);
+                    ndcgEl.textContent = (data.avg_ndcg_at_5 || 0).toFixed(3);
+                    negOracleEl.textContent = ((data.negative_oracle_pass_rate || 0) * 100).toFixed(0) + "%";
                     latencyEl.textContent = fmtSec(data.avg_latency_ms);
                     progressEl.textContent = `${total} / ${total}`;
                     statusEl.textContent = "Done";
+
+                    // Render difficulty breakdown
+                    if (data.by_difficulty) {
+                        const tbody = document.getElementById("eval-diff-body");
+                        tbody.innerHTML = "";
+                        const order = ["easy", "medium", "hard"];
+                        const diffs = Object.entries(data.by_difficulty).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
+                        for (const [diff, stats] of diffs) {
+                            const tr = document.createElement("tr");
+                            tr.innerHTML = `<td>${diffBadge(diff)}</td><td>${stats.count}</td><td>${stats.avg_recall_at_5.toFixed(3)}</td><td>${stats.avg_mrr.toFixed(3)}</td>`;
+                            tbody.appendChild(tr);
+                        }
+                        document.getElementById("eval-diff-breakdown").style.display = "block";
+                    }
                 },
                 onFinish(s) {
                     retAvgLatency = s.avg_latency_ms;
@@ -1160,6 +1284,9 @@
                         eval_type: "retrieval",
                         avg_precision_at_5: s.avg_precision_at_5,
                         avg_recall_at_5: s.avg_recall_at_5,
+                        avg_mrr: s.avg_mrr,
+                        avg_ndcg_at_5: s.avg_ndcg_at_5,
+                        negative_oracle_pass_rate: s.negative_oracle_pass_rate,
                         avg_retrieval_latency_ms: s.avg_latency_ms,
                         total_queries: s.total_queries,
                         embedding_model: retEmbModel || "text-embedding-3-small",
@@ -1171,11 +1298,18 @@
 
         async function runE2EEvals() {
             const passRateEl = document.getElementById("e2e-pass-rate");
+            const similarityEl = document.getElementById("e2e-similarity");
+            const hallucRateEl = document.getElementById("e2e-halluc-rate");
+            const fallbacksEl = document.getElementById("e2e-fallbacks");
             const latencyEl = document.getElementById("e2e-latency");
             const progressEl = document.getElementById("e2e-progress");
-            passRateEl.textContent = "—"; latencyEl.textContent = "—"; progressEl.textContent = "—";
+            passRateEl.textContent = "—"; similarityEl.textContent = "—";
+            hallucRateEl.textContent = "—"; fallbacksEl.textContent = "—";
+            latencyEl.textContent = "—"; progressEl.textContent = "—";
 
             let totalPassed = 0, runningLatency = 0, completed = 0, total = 0;
+            let runningSim = 0, simCount = 0, fallbackCount = 0;
+            let probeTotal = 0, probePassed = 0;
             const e2eEmbModel = document.getElementById("e2e-emb-select").value || "";
             const params = new URLSearchParams();
             if (e2eModel) params.set("model", e2eModel);
@@ -1188,7 +1322,13 @@
                     completed++;
                     if (data.passed) totalPassed++;
                     runningLatency += data.latency_ms;
+                    if (data.similarity_score != null) { runningSim += data.similarity_score; simCount++; }
+                    if (data.citation_is_fallback) fallbackCount++;
+                    if (data.is_hallucination_probe) { probeTotal++; if (data.passed) probePassed++; }
                     passRateEl.textContent = ((totalPassed / completed) * 100).toFixed(0) + "%";
+                    similarityEl.textContent = simCount ? (runningSim / simCount).toFixed(3) : "—";
+                    hallucRateEl.textContent = probeTotal ? ((probePassed / probeTotal) * 100).toFixed(0) + "%" : "—";
+                    fallbacksEl.textContent = String(fallbackCount);
                     latencyEl.textContent = fmtSec(runningLatency / completed);
                     progressEl.textContent = total ? `${completed} / ${total}` : `${completed}`;
                     rowsDiv.appendChild(buildE2ERow(data));
@@ -1196,6 +1336,9 @@
                 onSummary(data, statusEl) {
                     total = data.total_queries;
                     passRateEl.textContent = (data.pass_rate * 100).toFixed(0) + "%";
+                    similarityEl.textContent = data.avg_similarity != null ? data.avg_similarity.toFixed(3) : "—";
+                    hallucRateEl.textContent = data.hallucination_probe_pass_rate != null ? (data.hallucination_probe_pass_rate * 100).toFixed(0) + "%" : "—";
+                    fallbacksEl.textContent = data.citation_fallback_count != null ? String(data.citation_fallback_count) : "—";
                     latencyEl.textContent = fmtSec(data.avg_latency_ms);
                     progressEl.textContent = `${total} / ${total}`;
                     statusEl.textContent = `Done — ${data.passed}/${total} passed`;
@@ -1205,8 +1348,12 @@
                         model: e2eModel || defaultModelName(),
                         eval_type: "e2e",
                         pass_rate: s.pass_rate,
+                        avg_similarity: s.avg_similarity,
+                        hallucination_probe_pass_rate: s.hallucination_probe_pass_rate,
+                        citation_fallback_count: s.citation_fallback_count,
                         avg_e2e_latency_ms: s.avg_latency_ms,
                         total_queries: s.total_queries,
+                        embedding_model: e2eEmbModel || "text-embedding-3-small",
                     });
                 },
             });
@@ -1356,16 +1503,20 @@
                 console.error("Failed to fetch retrieval trials", e);
             }
             if (!trials.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">No retrieval trials yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" style="color:#555">No retrieval trials yet</td></tr>';
                 return;
             }
             // Find best values
-            const p5vals = trials.map(t => t.avg_precision_at_5).filter(v => v != null);
-            const r5vals = trials.map(t => t.avg_recall_at_5).filter(v => v != null);
-            const bestP5 = Math.max(...p5vals, -Infinity);
-            const bestR5 = Math.max(...r5vals, -Infinity);
+            const vals = (key) => trials.map(t => t[key]).filter(v => v != null);
+            const bestP5 = Math.max(...vals("avg_precision_at_5"), -Infinity);
+            const bestR5 = Math.max(...vals("avg_recall_at_5"), -Infinity);
+            const bestMRR = Math.max(...vals("avg_mrr"), -Infinity);
+            const bestNDCG = Math.max(...vals("avg_ndcg_at_5"), -Infinity);
+            const bestNegOracle = Math.max(...vals("negative_oracle_pass_rate"), -Infinity);
             const dash = '<span class="trial-no-data">--</span>';
             const best = (val, target) => val != null && val === target ? ' class="trial-best"' : '';
+            const fmtPct = (v) => v != null ? (v * 100).toFixed(0) + "%" : dash;
+            const fmt3 = (v) => v != null ? v.toFixed(3) : dash;
 
             tbody.innerHTML = "";
             for (const t of trials) {
@@ -1375,8 +1526,11 @@
                 tr.innerHTML =
                     `<td class="trial-model">${embName}</td>` +
                     `<td>${dims}</td>` +
-                    `<td${best(t.avg_precision_at_5, bestP5)}>${t.avg_precision_at_5 != null ? t.avg_precision_at_5.toFixed(3) : dash}</td>` +
-                    `<td${best(t.avg_recall_at_5, bestR5)}>${t.avg_recall_at_5 != null ? t.avg_recall_at_5.toFixed(3) : dash}</td>` +
+                    `<td${best(t.avg_precision_at_5, bestP5)}>${fmt3(t.avg_precision_at_5)}</td>` +
+                    `<td${best(t.avg_recall_at_5, bestR5)}>${fmt3(t.avg_recall_at_5)}</td>` +
+                    `<td${best(t.avg_mrr, bestMRR)}>${fmt3(t.avg_mrr)}</td>` +
+                    `<td${best(t.avg_ndcg_at_5, bestNDCG)}>${fmt3(t.avg_ndcg_at_5)}</td>` +
+                    `<td${best(t.negative_oracle_pass_rate, bestNegOracle)}>${fmtPct(t.negative_oracle_pass_rate)}</td>` +
                     `<td>${t.avg_retrieval_latency_ms != null ? fmtSec(t.avg_retrieval_latency_ms) : dash}</td>` +
                     `<td>${t.total_queries || dash}</td>` +
                     `<td><button class="trial-delete" onclick="deleteTrial(${t.id})">&#10005;</button></td>`;
@@ -1402,10 +1556,6 @@
 
         async function loadTrials() {
             const tbody = document.getElementById("trials-body");
-            if (!modelsData.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">Loading models...</td></tr>';
-                return;
-            }
             let trials = [];
             try {
                 const res = await fetch("/api/trials?eval_type=e2e");
@@ -1414,54 +1564,36 @@
             } catch (e) {
                 console.error("Failed to fetch trials", e);
             }
-
-            // Aggregate trials by model: latest e2e per model
-            const byModel = {};
-            // trials are already newest-first from the API
-            for (const t of trials) {
-                if (!byModel[t.model]) byModel[t.model] = { e2e: [] };
-                byModel[t.model].e2e.push(t);
+            if (!trials.length) {
+                tbody.innerHTML = '<tr><td colspan="9" style="color:#555">No E2E trials yet</td></tr>';
+                return;
             }
 
-            // Build per-model aggregates
-            const rows = modelsData.map(m => {
-                const agg = byModel[m.name] || { e2e: [] };
-                const latestE2E = agg.e2e[0];
-                return {
-                    m,
-                    latestE2E,
-                    e2eRuns: agg.e2e.length,
-                    passRate: latestE2E && latestE2E.pass_rate != null ? latestE2E.pass_rate : null,
-                    e2eLat: latestE2E && latestE2E.avg_e2e_latency_ms != null ? latestE2E.avg_e2e_latency_ms : null,
-                    allIds: agg.e2e.map(t => t.id),
-                };
-            });
+            // Find best values across all trials
+            const vals = (key) => trials.map(t => t[key]).filter(v => v != null);
+            const bestPassRate = Math.max(...vals("pass_rate"), -Infinity);
+            const bestSim = Math.max(...vals("avg_similarity"), -Infinity);
+            const bestHalluc = Math.max(...vals("hallucination_probe_pass_rate"), -Infinity);
+            const bestLat = Math.min(...vals("avg_e2e_latency_ms").filter(v => v > 0), Infinity);
 
-            // Find best values (highest pass rate, lowest e2e latency)
-            const vals = (key) => rows.map(r => r[key]).filter(v => v != null);
-            const bestPassRate = Math.max(...vals("passRate"), -Infinity);
-            const bestE2ELat = Math.min(...vals("e2eLat"), Infinity);
-
-            tbody.innerHTML = "";
             const dash = '<span class="trial-no-data">--</span>';
             const best = (val, target) => val != null && val === target ? ' class="trial-best"' : '';
 
-            for (const r of rows) {
-                const name = r.m.name.replace(/^gpt-/, "GPT-");
-                const inCost = r.m.input_cost_per_1m != null ? "$" + r.m.input_cost_per_1m.toFixed(2) : "--";
-                const outCost = r.m.output_cost_per_1m != null ? "$" + r.m.output_cost_per_1m.toFixed(2) : "--";
-                const hasData = r.e2eRuns > 0;
-
+            tbody.innerHTML = "";
+            for (const t of trials) {
+                const embName = escHtml(String(t.embedding_model || "--"));
+                const llmName = escHtml(String(t.model || "--"));
                 const tr = document.createElement("tr");
-                if (!hasData) tr.className = "trial-no-runs";
                 tr.innerHTML =
-                    `<td class="trial-model">${name}</td>` +
-                    `<td class="trial-cost">${inCost}</td>` +
-                    `<td class="trial-cost">${outCost}</td>` +
-                    `<td${best(r.passRate, bestPassRate)}>${r.passRate != null ? (r.passRate * 100).toFixed(0) + "%" : dash}</td>` +
-                    `<td${best(r.e2eLat, bestE2ELat)}>${r.e2eLat != null ? fmtSec(r.e2eLat) : dash}</td>` +
-                    `<td class="trial-runs">${r.e2eRuns || dash}</td>` +
-                    `<td>${hasData ? '<button class="trial-delete" onclick="deleteModelTrials([' + r.allIds.join(",") + '])">Clear</button>' : ""}</td>`;
+                    `<td class="trial-model" style="font-size:0.72rem">${embName}</td>` +
+                    `<td class="trial-model">${llmName}</td>` +
+                    `<td${best(t.pass_rate, bestPassRate)}>${t.pass_rate != null ? (t.pass_rate * 100).toFixed(0) + "%" : dash}</td>` +
+                    `<td${best(t.avg_similarity, bestSim)}>${t.avg_similarity != null ? t.avg_similarity.toFixed(3) : dash}</td>` +
+                    `<td${best(t.hallucination_probe_pass_rate, bestHalluc)}>${t.hallucination_probe_pass_rate != null ? (t.hallucination_probe_pass_rate * 100).toFixed(0) + "%" : dash}</td>` +
+                    `<td>${t.citation_fallback_count != null ? t.citation_fallback_count : dash}</td>` +
+                    `<td${best(t.avg_e2e_latency_ms, bestLat)}>${t.avg_e2e_latency_ms != null ? fmtSec(t.avg_e2e_latency_ms) : dash}</td>` +
+                    `<td>${t.total_queries || dash}</td>` +
+                    `<td><button class="trial-delete" onclick="deleteTrial(${t.id})">&#10005;</button></td>`;
                 tbody.appendChild(tr);
             }
         }
@@ -1497,6 +1629,8 @@
                     if (data.phase === "parsing") {
                         chunksEl.textContent = data.chunks;
                         progressEl.textContent = `${data.files} files → ${data.units} units`;
+                    } else if (data.phase === "rate_limited") {
+                        progressEl.textContent = `Rate limited — retrying in ${data.delay_sec}s (attempt ${data.retry})`;
                     } else if (data.phase === "embedding") {
                         progressEl.textContent = `${data.completed} / ${data.total}`;
                         elapsedEl.textContent = data.elapsed_sec + "s";
@@ -1506,7 +1640,8 @@
                     chunksEl.textContent = data.chunks_ingested;
                     progressEl.textContent = `${data.chunks_ingested} / ${data.chunks_ingested}`;
                     elapsedEl.textContent = data.ingestion_time_sec + "s";
-                    statusEl.textContent = `Done — ${data.chunks_per_sec} chunks/sec`;
+                    const covStr = data.coverage_pct != null ? ` | Coverage: ${data.coverage_pct}%` : "";
+                    statusEl.textContent = `Done — ${data.chunks_per_sec} chunks/sec${covStr}`;
                 },
                 onFinish(s) {
                     loadQueryEmbeddingModels();
@@ -1518,6 +1653,7 @@
                         ingestion_time_sec: s.ingestion_time_sec,
                         chunks_ingested: s.chunks_ingested,
                         files_processed: s.files_processed,
+                        coverage_pct: s.coverage_pct,
                     });
                 },
             });
@@ -1534,7 +1670,7 @@
                 console.error("Failed to fetch ingestion trials", e);
             }
             if (!trials.length) {
-                tbody.innerHTML = '<tr><td colspan="7" style="color:#555">No ingestion trials yet</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="color:#555">No ingestion trials yet</td></tr>';
                 return;
             }
             // Find best values
@@ -1552,15 +1688,18 @@
                 const timeSec = t.ingestion_time_sec;
                 const chunks = t.chunks_ingested;
                 const files = t.files_processed;
+                const cov = t.coverage_pct;
                 const cps = timeSec && chunks ? (chunks / timeSec).toFixed(1) : null;
                 const isBestTime = timeSec != null && timeSec === bestTime;
                 const isBestSpeed = cps != null && parseFloat(cps) === parseFloat(bestSpeed.toFixed(1));
+                const covClass = cov != null && cov === 100.0 ? ' class="trial-best"' : '';
                 tr.innerHTML =
                     `<td class="trial-model">${embName}</td>` +
                     `<td>${dims}</td>` +
                     `<td${isBestTime ? ' class="trial-best"' : ''}>${timeSec != null ? timeSec.toFixed(1) + "s" : dash}</td>` +
                     `<td>${chunks != null ? chunks : dash}</td>` +
                     `<td>${files != null ? files : dash}</td>` +
+                    `<td${covClass}>${cov != null ? cov + "%" : dash}</td>` +
                     `<td${isBestSpeed ? ' class="trial-best"' : ''}>${cps != null ? cps : dash}</td>` +
                     `<td><button class="trial-delete" onclick="deleteTrial(${t.id})">&#10005;</button></td>`;
                 tbody.appendChild(tr);

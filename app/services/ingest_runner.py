@@ -19,6 +19,8 @@ EXCLUDE_DIRS = {"VARIANTS", "TESTING", "INSTALL", "CBLAS"}
 _DEFAULT_EXTENSIONS = [".f", ".f90"]
 _DEFAULT_SUBDIRS = ["SRC", "BLAS/SRC"]
 _EMBED_BATCH_SIZE = 50
+_MAX_RETRIES = 5
+_RETRY_BASE_DELAY = 2.0  # seconds, doubles each retry
 
 # Concurrency guard — only one ingestion at a time
 _ingest_lock = asyncio.Lock()
@@ -70,11 +72,13 @@ async def ingest_stream_generator(embedding_model: str):
             return
 
         all_units = []
+        parse_errors = 0
         for file_path in all_files:
             try:
                 units = await asyncio.to_thread(parse_file, file_path)
                 all_units.extend(units)
             except Exception as e:
+                parse_errors += 1
                 logger.warning("Failed to parse %s: %s", file_path, e)
 
         # Build reverse call-graph
@@ -85,11 +89,17 @@ async def ingest_stream_generator(embedding_model: str):
 
         all_chunks = await asyncio.to_thread(chunk_units, all_units, called_by_map=called_by_map)
 
+        files_parsed = len(all_files) - parse_errors
+        coverage_pct = round(100.0 * files_parsed / len(all_files), 1) if all_files else 0.0
+
         yield _sse_event("progress", {
             "phase": "parsing",
             "files": len(all_files),
+            "files_parsed": files_parsed,
+            "parse_errors": parse_errors,
             "units": len(all_units),
             "chunks": len(all_chunks),
+            "coverage_pct": coverage_pct,
         })
 
         # Phase 2: Delete old collection and recreate
@@ -109,13 +119,28 @@ async def ingest_stream_generator(embedding_model: str):
             texts = [c.text for c in batch]
 
             batch_t0 = time.time()
-            try:
-                embeddings = await asyncio.to_thread(embed_texts, texts, embedding_model)
-                await asyncio.to_thread(upsert_chunks, batch, embeddings, target_collection)
-            except Exception as e:
-                logger.error("Embedding/upsert failed at batch %d: %s", i, e)
-                yield _sse_event("error", {"message": f"Embedding failed: {e}"})
-                return
+            for attempt in range(_MAX_RETRIES):
+                try:
+                    embeddings = await asyncio.to_thread(embed_texts, texts, embedding_model)
+                    await asyncio.to_thread(upsert_chunks, batch, embeddings, target_collection)
+                    break
+                except Exception as e:
+                    is_rate_limit = "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)
+                    if is_rate_limit and attempt < _MAX_RETRIES - 1:
+                        delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                        logger.warning("Rate limited at batch %d, retrying in %.0fs (attempt %d/%d)",
+                                       i, delay, attempt + 1, _MAX_RETRIES)
+                        yield _sse_event("progress", {
+                            "phase": "rate_limited",
+                            "batch": i // _EMBED_BATCH_SIZE,
+                            "retry": attempt + 1,
+                            "delay_sec": delay,
+                        })
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error("Embedding/upsert failed at batch %d: %s", i, e)
+                        yield _sse_event("error", {"message": f"Embedding failed: {e}"})
+                        return
             batch_elapsed = time.time() - batch_t0
 
             total_upserted += len(batch)
@@ -135,6 +160,9 @@ async def ingest_stream_generator(embedding_model: str):
             "embedding_model": embedding_model,
             "dimensions": model_info.dimensions,
             "files_processed": len(all_files),
+            "files_parsed": files_parsed,
+            "parse_errors": parse_errors,
+            "coverage_pct": coverage_pct,
             "chunks_ingested": total_upserted,
             "ingestion_time_sec": round(elapsed, 2),
             "chunks_per_sec": round(chunks_per_sec, 1),

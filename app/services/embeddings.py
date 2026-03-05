@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections import OrderedDict
 from functools import lru_cache
 
 import tiktoken
@@ -139,8 +140,14 @@ def _voyage_embed_call(client, batch, model):
 
 
 def _gemini_embed_call(client, batch, model):
-    result = client.models.embed_content(model=model, contents=batch)
-    return [e.values for e in result.embeddings]
+    from app.services.gemini_helpers import retry_on_rate_limit_sync
+
+    @retry_on_rate_limit_sync
+    def _call():
+        result = client.models.embed_content(model=model, contents=batch)
+        return [e.values for e in result.embeddings]
+
+    return _call()
 
 
 def _cohere_embed_call(client, batch, model):
@@ -176,12 +183,18 @@ async def _voyage_embed_single(text: str, model: str) -> list[float]:
 
 
 async def _gemini_embed_single(text: str, model: str) -> list[float]:
-    client = _get_gemini_client()
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None, lambda: client.models.embed_content(model=model, contents=[text])
-    )
-    return result.embeddings[0].values
+    from app.services.gemini_helpers import retry_on_rate_limit
+
+    @retry_on_rate_limit
+    async def _call():
+        client = _get_gemini_client()
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, lambda: client.models.embed_content(model=model, contents=[text])
+        )
+        return result.embeddings[0].values
+
+    return await _call()
 
 
 async def _cohere_embed_single(text: str, model: str) -> list[float]:
@@ -207,8 +220,8 @@ _ASYNC_DISPATCH = {
 # Public API
 # ---------------------------------------------------------------------------
 
-_embed_cache: dict[tuple[str, str], list[float]] = {}
-_EMBED_CACHE_MAX = 128
+_embed_cache: OrderedDict[tuple[str, str], list[float]] = OrderedDict()
+_EMBED_CACHE_MAX = 256
 
 
 def _resolve_model(model: str | None) -> tuple[str, str, int]:
@@ -230,6 +243,7 @@ async def embed_query(text: str, model: str | None = None) -> list[float]:
     cache_key = (resolved_model, text)
 
     if cache_key in _embed_cache:
+        _embed_cache.move_to_end(cache_key)
         return _embed_cache[cache_key]
 
     encoder = _encoder_for_model(resolved_model)
@@ -238,10 +252,9 @@ async def embed_query(text: str, model: str | None = None) -> list[float]:
     embed_fn = _ASYNC_DISPATCH[provider]
     embedding = await embed_fn(truncated, resolved_model)
 
-    if len(_embed_cache) >= _EMBED_CACHE_MAX:
-        oldest = next(iter(_embed_cache))
-        del _embed_cache[oldest]
     _embed_cache[cache_key] = embedding
+    if len(_embed_cache) > _EMBED_CACHE_MAX:
+        _embed_cache.popitem(last=False)  # evict least-recently-used
 
     return embedding
 

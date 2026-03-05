@@ -94,6 +94,13 @@ class TrialRequest(BaseModel):
     ingestion_time_sec: float | None = None
     chunks_ingested: int | None = None
     files_processed: int | None = None
+    coverage_pct: float | None = None
+    avg_mrr: float | None = None
+    avg_ndcg_at_5: float | None = None
+    negative_oracle_pass_rate: float | None = None
+    avg_similarity: float | None = None
+    hallucination_probe_pass_rate: float | None = None
+    citation_fallback_count: int | None = None
     notes: str = ""
 
     @field_validator("embedding_model")

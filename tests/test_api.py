@@ -287,6 +287,15 @@ def test_eval_stream_emits_progress_events(mock_retrieve):
     assert "retrieved_files" in first
     assert "expected_files" in first
     assert first["index"] == 0
+    # New retrieval metrics
+    assert "mrr" in first
+    assert "ndcg_at_5" in first
+    assert "negative_oracle_pass" in first
+    assert "precision_at_1" in first
+    assert "precision_at_3" in first
+    assert "recall_at_1" in first
+    assert "recall_at_3" in first
+    assert "difficulty" in first
 
 
 @patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
@@ -302,24 +311,46 @@ def test_eval_stream_summary_is_last_event(mock_retrieve):
     assert "avg_latency_ms" in summary
     assert summary["total_queries"] == len(EVAL_QUERIES)
     assert 0.0 <= summary["avg_recall_at_5"] <= 1.0
+    # New summary metrics
+    assert "avg_mrr" in summary
+    assert "avg_ndcg_at_5" in summary
+    assert "negative_oracle_pass_rate" in summary
+    assert "by_difficulty" in summary
+    by_diff = summary["by_difficulty"]
+    assert isinstance(by_diff, dict)
+    # Should have at least one difficulty tier
+    for tier_data in by_diff.values():
+        assert "avg_recall_at_5" in tier_data
+        assert "avg_mrr" in tier_data
+        assert "count" in tier_data
 
 
+@patch("app.services.embeddings.embed_query", new_callable=AsyncMock)
 @patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
 @patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
-def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
+def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate, mock_embed):
     mock_retrieve.return_value = _EVAL_RETRIEVE
+    # Answer must be >=200 chars and contain ALL keywords for each query.
+    # Use a kitchen-sink answer that covers all keyword sets.
     mock_generate.return_value = make_generate_result(
         answer=(
             "DGESV solves a linear system of equations using LU factorization with partial pivoting. "
-            "It calls DGETRF and DGETRS. The routine performs matrix multiplication via DGEMM and "
-            "triangular solve with DTRSM. DGEQRF handles QR. The norm of the matrix is computed. "
-            "Singular value decomposition is used. Cholesky symmetric factorization via DPOTRF. "
-            "Least square problems solved by DGELS. Error check and workspace query with LWORK. "
-            "Loop and block optimizations improve performance. Each routine validates dimension and LDA. "
-            "INFO parameter and N must be positive."
+            "It calls DGETRF and DGETRS for the factorization and back-substitution steps. "
+            "The singular bidiagonal decomposition is computed via DGESVD with JOBU parameter. "
+            "DGEMM performs matrix multiply with alpha and transpose options. "
+            "The pivot selection uses blocked algorithms. DLANGE computes the Frobenius norm of a matrix. "
+            "Cholesky factorization for symmetric positive definite matrices is done by DPOTRF. "
+            "DGELS solves least squares problems using QR factorization and orthogonal transformations. "
+            "Error checking validates INFO and XERBLA handles dimension and LDA constraints. "
+            "Workspace query via LWORK returns optimal workspace size. "
+            "Loop and block and cache optimizations improve BLAS performance. "
+            "The driver routines handle substitution and validation of singular systems. "
+            "IDAMAX selects pivots. This routine does not exist in LAPACK source."
         ),
         citations=["dgesv.f:1-50"],
     )
+    # Mock embed_query to return a fixed vector
+    mock_embed.return_value = [1.0, 0.0, 0.0]
 
     response = client.get("/api/eval/e2e/stream")
     assert response.status_code == 200
@@ -337,6 +368,9 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     assert "answer_preview" in first
     assert "citations" in first
     assert isinstance(first["citations"], list)
+    # New E2E fields
+    assert "is_hallucination_probe" in first
+    assert "citation_is_fallback" in first
 
     assert events[-1]["event"] == "summary"
     summary = events[-1]["data"]
@@ -344,14 +378,20 @@ def test_e2e_eval_stream_endpoint(mock_retrieve, mock_generate):
     assert "passed" in summary
     assert "failed" in summary
     assert summary["total_queries"] == len(E2E_EVAL_QUERIES)
+    # New summary fields
+    assert "avg_similarity" in summary
+    assert "hallucination_probe_pass_rate" in summary
+    assert "citation_fallback_count" in summary
 
 
+@patch("app.services.embeddings.embed_query", new_callable=AsyncMock)
 @patch("app.services.eval_runner.generate_answer", new_callable=AsyncMock)
 @patch("app.services.eval_runner.retrieve", new_callable=AsyncMock)
-def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate):
+def test_e2e_eval_stream_includes_failed_checks(mock_retrieve, mock_generate, mock_embed):
     """E2E eval stream includes progress events when checks fail (branch coverage)."""
     mock_retrieve.return_value = _EVAL_RETRIEVE
     mock_generate.return_value = make_generate_result(answer="Short.")
+    mock_embed.return_value = [1.0, 0.0, 0.0]
 
     response = client.get("/api/eval/e2e/stream")
     assert response.status_code == 200
@@ -370,11 +410,10 @@ def test_models_endpoint():
     data = response.json()
     assert "models" in data
     models = data["models"]
-    assert len(models) >= 12  # 9 OpenAI + 3 Gemini
+    assert len(models) >= 11  # 9 OpenAI + 2 Gemini
     names = [m["name"] for m in models]
     assert "gpt-4o-mini" in names
     assert "gpt-4o" in names
-    assert "gemini-2.0-flash" in names
     defaults = [m for m in models if m.get("default")]
     assert len(defaults) == 1
     for m in models:

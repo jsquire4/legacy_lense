@@ -492,10 +492,10 @@ async def test_generate_answer_gemini_dispatch(mock_gemini_gen_settings):
     ))
 
     chunks = [{"text": "SUBROUTINE DGESV", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
-    result = await generate_answer("What is DGESV?", chunks, None, model="gemini-2.0-flash")
+    result = await generate_answer("What is DGESV?", chunks, None, model="gemini-2.5-flash")
 
     assert "Gemini answer" in result["answer"]
-    assert result["model"] == "gemini-2.0-flash"
+    assert result["model"] == "gemini-2.5-flash"
     assert result["token_usage"]["prompt_tokens"] == 100
     mock_client.aio.models.generate_content.assert_called_once()
 
@@ -503,7 +503,7 @@ async def test_generate_answer_gemini_dispatch(mock_gemini_gen_settings):
 @pytest.mark.asyncio
 async def test_generate_answer_gemini_empty_chunks(mock_gemini_gen_settings):
     """generate_answer returns fallback for Gemini when chunks empty."""
-    result = await generate_answer("What?", [], None, model="gemini-2.0-flash")
+    result = await generate_answer("What?", [], None, model="gemini-2.5-flash")
     assert "don't have sufficient context" in result["answer"]
 
 
@@ -517,7 +517,7 @@ async def test_generate_answer_gemini_citation_fallback(mock_gemini_gen_settings
     ))
 
     chunks = [{"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
-    result = await generate_answer("What?", chunks, None, model="gemini-2.0-flash")
+    result = await generate_answer("What?", chunks, None, model="gemini-2.5-flash")
     assert "Sources:" in result["answer"]
     assert "dgesv.f:1-50" in result["citations"]
 
@@ -539,7 +539,7 @@ async def test_generate_answer_stream_gemini(mock_gemini_gen_settings):
     mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_async_iter())
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.5-flash")]
     token_events = [e for e in events if e["type"] == "token"]
     assert any("Hello" in e["token"] for e in token_events)
     assert any("world" in e["token"] for e in token_events)
@@ -563,7 +563,7 @@ async def test_generate_answer_gemini_track_ttft(mock_gemini_gen_settings):
     mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_async_iter())
 
     chunks = [{"text": "code", "metadata": {}}]
-    result = await generate_answer("What?", chunks, None, track_ttft=True, model="gemini-2.0-flash")
+    result = await generate_answer("What?", chunks, None, track_ttft=True, model="gemini-2.5-flash")
     assert "Answer" in result["answer"]
     assert "ttft_ms" in result
     assert isinstance(result["ttft_ms"], (int, float))
@@ -581,7 +581,7 @@ async def test_generate_answer_stream_gemini_error(mock_gemini_gen_settings):
     mock_client.aio.models.generate_content_stream = AsyncMock(return_value=failing_stream())
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.5-flash")]
     error_events = [e for e in events if e["type"] == "error"]
     assert len(error_events) == 1
     assert "Gemini API unavailable" in error_events[0]["message"]
@@ -598,7 +598,7 @@ async def test_generate_answer_stream_gemini_citation_fallback(mock_gemini_gen_s
     mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
 
     chunks = [{"text": "code", "metadata": {"file_path": "dgesv.f", "start_line": 1, "end_line": 50}}]
-    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.5-flash")]
     token_events = [e for e in events if e["type"] == "token"]
     assert any("Sources:" in e["token"] for e in token_events)
     assert events[-1]["type"] == "done"
@@ -627,7 +627,7 @@ async def test_gemini_generate_stream_safety_block(mock_gemini_gen_settings):
     mock_client.aio.models.generate_content_stream = AsyncMock(return_value=fake_stream())
 
     chunks = [{"text": "code", "metadata": {}}]
-    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.0-flash")]
+    events = [e async for e in generate_answer_stream("What?", chunks, None, model="gemini-2.5-flash")]
     token_events = [e for e in events if e["type"] == "token"]
     # The blocked chunk should produce empty text (skipped), OK chunk should appear
     assert any("OK" in e["token"] for e in token_events)
@@ -647,7 +647,7 @@ async def test_gemini_generate_nonstream_error(mock_gemini_gen_settings):
 
     chunks = [{"text": "code", "metadata": {}}]
     with pytest.raises(RuntimeError, match="Gemini API down"):
-        await generate_answer("What?", chunks, None, model="gemini-2.0-flash")
+        await generate_answer("What?", chunks, None, model="gemini-2.5-flash")
 
 
 # --- Audit issue #22: messages_to_gemini edge cases ---

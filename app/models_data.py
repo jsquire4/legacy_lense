@@ -21,7 +21,6 @@ MODELS: dict[str, ModelInfo] = {
     "gpt-5-nano": ModelInfo("openai", 0.05, 0.40),
     "gpt-5-mini": ModelInfo("openai", 0.25, 2.00),
     "gpt-5.2": ModelInfo("openai", 1.75, 14.00),
-    "gemini-2.0-flash": ModelInfo("gemini", 0.10, 0.40),
     "gemini-2.5-flash": ModelInfo("gemini", 0.30, 2.50),
     "gemini-2.5-pro": ModelInfo("gemini", 1.25, 10.00),
 }

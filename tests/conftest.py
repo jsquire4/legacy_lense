@@ -164,7 +164,7 @@ def mock_gemini_gen_settings():
     with patch("app.services.generation.get_settings") as ms, \
          patch("app.services.generation._get_gemini_client") as mc:
         settings = MagicMock()
-        settings.CHAT_MODEL = "gemini-2.0-flash"
+        settings.CHAT_MODEL = "gemini-2.5-flash"
         ms.return_value = settings
         mock_client = MagicMock()
         mock_client.aio.models.generate_content = AsyncMock()

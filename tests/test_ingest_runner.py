@@ -62,8 +62,11 @@ async def test_successful_ingestion_emits_correct_events(
     parse_events = [e for e in events if e["event"] == "progress" and e["data"].get("phase") == "parsing"]
     assert len(parse_events) == 1
     assert parse_events[0]["data"]["files"] == 1
+    assert parse_events[0]["data"]["files_parsed"] == 1
+    assert parse_events[0]["data"]["parse_errors"] == 0
     assert parse_events[0]["data"]["units"] == 1
     assert parse_events[0]["data"]["chunks"] == 1
+    assert parse_events[0]["data"]["coverage_pct"] == 100.0
 
     # Check embedding progress event
     embed_events = [e for e in events if e["event"] == "progress" and e["data"].get("phase") == "embedding"]
@@ -76,6 +79,9 @@ async def test_successful_ingestion_emits_correct_events(
     assert summary["embedding_model"] == "text-embedding-3-small"
     assert summary["dimensions"] == 1536
     assert summary["files_processed"] == 1
+    assert summary["files_parsed"] == 1
+    assert summary["parse_errors"] == 0
+    assert summary["coverage_pct"] == 100.0
     assert summary["chunks_ingested"] == 1
     assert "ingestion_time_sec" in summary
     assert "chunks_per_sec" in summary

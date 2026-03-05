@@ -1,8 +1,15 @@
 """Shared Gemini client and message conversion utilities."""
 
-from functools import lru_cache
+import asyncio
+import logging
+from functools import lru_cache, wraps
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 5
+_RETRY_BASE_DELAY = 2.0  # doubles each retry: 2, 4, 8, 16, 32s
 
 
 @lru_cache
@@ -50,3 +57,46 @@ def build_gemini_config(system_instruction: str | None, max_completion_tokens: i
     if model is None or not is_gemini_reasoning_model(model):
         kwargs["temperature"] = temperature
     return types.GenerateContentConfig(**kwargs)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Check if an exception is a Gemini 429 / RESOURCE_EXHAUSTED error."""
+    msg = str(exc)
+    return "429" in msg or "RESOURCE_EXHAUSTED" in msg
+
+
+def retry_on_rate_limit(func):
+    """Decorator: retry an async function on Gemini rate-limit errors with exponential backoff."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                if _is_rate_limit_error(e) and attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning("Gemini rate limited, retrying in %.0fs (attempt %d/%d): %s",
+                                   delay, attempt + 1, _MAX_RETRIES, e)
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+    return wrapper
+
+
+def retry_on_rate_limit_sync(func):
+    """Decorator: retry a sync function on Gemini rate-limit errors with exponential backoff."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        import time
+        for attempt in range(_MAX_RETRIES):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                if _is_rate_limit_error(e) and attempt < _MAX_RETRIES - 1:
+                    delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning("Gemini rate limited, retrying in %.0fs (attempt %d/%d): %s",
+                                   delay, attempt + 1, _MAX_RETRIES, e)
+                    time.sleep(delay)
+                else:
+                    raise
+    return wrapper

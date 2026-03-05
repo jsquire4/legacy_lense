@@ -166,31 +166,44 @@ Question: {query}"""
 
 async def _gemini_generate(model: str, messages: list[dict], max_completion_tokens: int) -> tuple[str, dict]:
     """Non-streaming Gemini generation. Returns (text, token_usage)."""
-    client = _get_gemini_client()
-    system_instruction, contents = _messages_to_gemini(messages)
-    config = _build_gemini_config(system_instruction, max_completion_tokens)
+    from app.services.gemini_helpers import retry_on_rate_limit
 
-    response = await client.aio.models.generate_content(
-        model=model, contents=contents, config=config,
-    )
+    @retry_on_rate_limit
+    async def _call():
+        client = _get_gemini_client()
+        system_instruction, contents = _messages_to_gemini(messages)
+        config = _build_gemini_config(system_instruction, max_completion_tokens)
 
-    try:
-        answer_text = response.text or ""
-    except ValueError:
-        # Gemini SDK raises ValueError when response is blocked (safety/recitation)
-        answer_text = ""
-    return answer_text, _extract_gemini_usage(response.usage_metadata)
+        response = await client.aio.models.generate_content(
+            model=model, contents=contents, config=config,
+        )
+
+        try:
+            answer_text = response.text or ""
+        except ValueError:
+            answer_text = ""
+        return answer_text, _extract_gemini_usage(response.usage_metadata)
+
+    return await _call()
 
 
 async def _gemini_generate_stream(model: str, messages: list[dict], max_completion_tokens: int):
-    """Streaming Gemini generation. Yields (chunk_text, usage_metadata) tuples."""
-    client = _get_gemini_client()
-    system_instruction, contents = _messages_to_gemini(messages)
-    config = _build_gemini_config(system_instruction, max_completion_tokens)
+    """Streaming Gemini generation. Yields (chunk_text, usage_metadata) tuples.
 
-    stream = await client.aio.models.generate_content_stream(
-        model=model, contents=contents, config=config,
-    )
+    Retries on rate-limit errors when opening the stream.
+    """
+    from app.services.gemini_helpers import retry_on_rate_limit
+
+    @retry_on_rate_limit
+    async def _open_stream():
+        client = _get_gemini_client()
+        system_instruction, contents = _messages_to_gemini(messages)
+        config = _build_gemini_config(system_instruction, max_completion_tokens)
+        return await client.aio.models.generate_content_stream(
+            model=model, contents=contents, config=config,
+        )
+
+    stream = await _open_stream()
     async for chunk in stream:
         try:
             text = chunk.text or ""

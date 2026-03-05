@@ -85,7 +85,7 @@ async def test_expand_query_gemini_dispatch(mock_gemini_fn, mock_settings):
     mock_gemini_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
     mock_gemini_fn.return_value = mock_gemini_client
 
-    result = await _expand_query("How does SVD work?", model="gemini-2.0-flash")
+    result = await _expand_query("How does SVD work?", model="gemini-2.5-flash")
 
     assert "DGESVD" in result
     assert "DGESDD" in result

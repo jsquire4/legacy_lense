@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from collections import OrderedDict
 
 from app.services.embeddings import embed_query, get_async_openai_client
 from app.services.vector_store import async_search, async_search_by_name, async_search_by_caller
@@ -10,6 +11,10 @@ from app.config import get_settings
 from app.models_data import get_provider
 
 logger = logging.getLogger(__name__)
+
+# --- LRU cache for _expand_query results ---
+_EXPANSION_CACHE: OrderedDict[tuple[str, str], list[str]] = OrderedDict()
+_EXPANSION_CACHE_MAX = 256
 
 # Pattern to detect LAPACK/BLAS routine names in queries (case-sensitive, min 4 chars after prefix)
 _ROUTINE_NAME_RE = re.compile(r'\b([SDCZI][A-Z][A-Z0-9]{2,})\b')
@@ -58,6 +63,14 @@ async def _expand_query(query: str, model: str | None = None) -> list[str]:
     try:
         settings = get_settings()
         resolved_model = model or settings.CHAT_MODEL
+        cache_key = (query, resolved_model)
+
+        # LRU cache check
+        if cache_key in _EXPANSION_CACHE:
+            _EXPANSION_CACHE.move_to_end(cache_key)
+            logger.info("Expansion cache hit for '%.60s'", query)
+            return _EXPANSION_CACHE[cache_key]
+
         provider = get_provider(resolved_model)
 
         messages = [
@@ -66,13 +79,18 @@ async def _expand_query(query: str, model: str | None = None) -> list[str]:
         ]
 
         if provider == "gemini":
-            from app.services.gemini_helpers import get_gemini_client, messages_to_gemini, build_gemini_config
+            from app.services.gemini_helpers import get_gemini_client, messages_to_gemini, build_gemini_config, retry_on_rate_limit
             client = get_gemini_client()
             system_instruction, contents = messages_to_gemini(messages)
             config = build_gemini_config(system_instruction, max_completion_tokens=50, temperature=0)
-            response = await client.aio.models.generate_content(
-                model=resolved_model, contents=contents, config=config,
-            )
+
+            @retry_on_rate_limit
+            async def _gemini_expand():
+                return await client.aio.models.generate_content(
+                    model=resolved_model, contents=contents, config=config,
+                )
+
+            response = await _gemini_expand()
             text = (response.text or "").strip()
         else:
             from app.services.generation import _build_llm_kwargs
@@ -87,6 +105,12 @@ async def _expand_query(query: str, model: str | None = None) -> list[str]:
         all_tokens = re.findall(r'[A-Z][A-Z0-9]{3,}', text.upper())
         names = [n for n in all_tokens if n[0] in "SDCZI" and len(n) >= 4]
         logger.info("Query expansion for '%.60s': %s", query, names)
+
+        # Populate LRU cache
+        _EXPANSION_CACHE[cache_key] = names
+        if len(_EXPANSION_CACHE) > _EXPANSION_CACHE_MAX:
+            _EXPANSION_CACHE.popitem(last=False)
+
         return names
     except Exception as e:
         logger.warning("Query expansion failed for '%.60s': %s", query, e)
@@ -201,6 +225,11 @@ async def retrieve(query: str, top_k: int = 5, model: str | None = None, capabil
         logger.error("Failed to embed query")
         return {"chunks": [], "expanded_names": [], "retrieval_strategy": "failed"}
 
+    # Fire vector search immediately — runs in parallel with name/expansion work
+    vector_task = asyncio.create_task(
+        async_search(query_embedding, top_k=top_k, collection_name=collection_name)
+    )
+
     routine_name = _extract_routine_name(query)
     seen_ids: set = set()
     resolved_expanded: list[str] = []
@@ -241,8 +270,8 @@ async def retrieve(query: str, top_k: int = 5, model: str | None = None, capabil
         caller_results = await _caller_search(query_embedding, routine_name, seen_ids,
                                               collection_name=collection_name)
 
-    vector_results = await async_search(query_embedding, top_k=top_k,
-                                        collection_name=collection_name)
+    # Await the vector search that's been running in parallel
+    vector_results = await vector_task
 
     merged = list(name_results) + call_graph_results + caller_results
     for r in vector_results:

@@ -87,13 +87,22 @@ async def _warm_cache():
     Note: embedding_model is intentionally omitted — warmup only covers the
     default collection (text-embedding-3-small).
     """
-    for model in _WARMUP_MODELS:
-        for query, capability in _WARMUP_QUERIES:
+    sem = asyncio.Semaphore(5)
+
+    async def _warm_one(model: str, query: str, capability: str | None):
+        async with sem:
             try:
                 await _build_response(query, 5, capability, model)
                 logger.info("Cache warmed [%s]: %.60s", model, query)
             except Exception as e:
                 logger.warning("Cache warmup failed [%s] '%.60s': %s", model, query, e)
+
+    tasks = [
+        _warm_one(model, query, capability)
+        for model in _WARMUP_MODELS
+        for query, capability in _WARMUP_QUERIES
+    ]
+    await asyncio.gather(*tasks)
 
 
 @asynccontextmanager
@@ -436,6 +445,12 @@ async def create_trial_endpoint(req: TrialRequest):
         "ingestion_time_sec": req.ingestion_time_sec,
         "chunks_ingested": req.chunks_ingested,
         "files_processed": req.files_processed,
+        "avg_mrr": req.avg_mrr,
+        "avg_ndcg_at_5": req.avg_ndcg_at_5,
+        "negative_oracle_pass_rate": req.negative_oracle_pass_rate,
+        "avg_similarity": req.avg_similarity,
+        "hallucination_probe_pass_rate": req.hallucination_probe_pass_rate,
+        "citation_fallback_count": req.citation_fallback_count,
         "notes": req.notes,
     }
     trial_id = save_trial(data)

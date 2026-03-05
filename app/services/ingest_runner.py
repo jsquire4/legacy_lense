@@ -63,6 +63,7 @@ async def ingest_stream_generator(embedding_model: str):
 
         if use_fixture:
             all_chunks = await asyncio.to_thread(load_chunks_from_fixture)
+            fixture_files = {c.metadata.get("file_path") for c in all_chunks if c.metadata.get("file_path")}
             yield _sse_event("progress", {
                 "phase": "parsing",
                 "source": "fixture",
@@ -178,6 +179,8 @@ async def ingest_stream_generator(embedding_model: str):
         }
         if use_fixture:
             summary_data["source"] = "fixture"
+            summary_data["files_processed"] = len(fixture_files)
+            summary_data["coverage_pct"] = 100.0
         else:
             summary_data.update({
                 "source": "files",

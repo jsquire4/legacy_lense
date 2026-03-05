@@ -441,6 +441,7 @@ async def create_trial_endpoint(req: TrialRequest):
         "eval_type": req.eval_type,
         "avg_recall_at_5": req.avg_recall_at_5,
         "avg_precision_at_5": req.avg_precision_at_5,
+        "avg_max_precision_at_5": req.avg_max_precision_at_5,
         "pass_rate": req.pass_rate,
         "avg_retrieval_latency_ms": req.avg_retrieval_latency_ms,
         "avg_e2e_latency_ms": req.avg_e2e_latency_ms,

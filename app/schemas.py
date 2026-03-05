@@ -92,6 +92,7 @@ class TrialRequest(BaseModel):
     eval_type: str
     avg_recall_at_5: float | None = None
     avg_precision_at_5: float | None = None
+    avg_max_precision_at_5: float | None = None
     pass_rate: float | None = None
     avg_retrieval_latency_ms: float | None = None
     avg_e2e_latency_ms: float | None = None

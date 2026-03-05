@@ -46,6 +46,7 @@ _MIGRATIONS = [
     ("avg_similarity", "ALTER TABLE trials ADD COLUMN avg_similarity REAL"),
     ("hallucination_probe_pass_rate", "ALTER TABLE trials ADD COLUMN hallucination_probe_pass_rate REAL"),
     ("citation_fallback_count", "ALTER TABLE trials ADD COLUMN citation_fallback_count INTEGER"),
+    ("avg_max_precision_at_5", "ALTER TABLE trials ADD COLUMN avg_max_precision_at_5 REAL"),
 ]
 
 
@@ -77,8 +78,8 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
                 ingestion_time_sec, chunks_ingested, files_processed, coverage_pct,
                 avg_mrr, avg_ndcg_at_5, negative_oracle_pass_rate,
                 avg_similarity, hallucination_probe_pass_rate, citation_fallback_count,
-                notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                avg_max_precision_at_5, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 data.get("created_at", datetime.now(timezone.utc).isoformat()),
                 data["model"],
@@ -103,6 +104,7 @@ def save_trial(data: dict, db_path: Path = DEFAULT_DB_PATH) -> int:
                 data.get("avg_similarity"),
                 data.get("hallucination_probe_pass_rate"),
                 data.get("citation_fallback_count"),
+                data.get("avg_max_precision_at_5"),
                 data.get("notes", ""),
             ),
         )

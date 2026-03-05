@@ -592,7 +592,7 @@
 
         <!-- Retrieval Evals -->
         <div class="panel">
-            <h2 class="panel-title">Retrieval Evals <span id="ret-summary" style="font-size:0.85rem;font-weight:normal;color:#aaa"></span></h2>
+            <h2 class="panel-title">Retrieval Evals</h2>
             <div class="eval-controls">
                 <select id="ret-model-select" class="model-select"><option value="">Loading...</option></select>
                 <button id="eval-btn" onclick="runEvals()">Run Retrieval</button>
@@ -623,7 +623,7 @@
             <h2 class="panel-title">Retrieval Trial History</h2>
             <div class="trial-scroll">
                 <table class="trial-table" id="ret-trials-table">
-                    <thead><tr><th>Embedding Model</th><th>Dims</th><th>P@5</th><th>R@5</th><th>MRR</th><th>NDCG@5</th><th>Neg Oracle</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
+                    <thead><tr><th>Embedding Model</th><th>Dims</th><th>P@5 (% of max)</th><th>R@5</th><th>MRR</th><th>NDCG@5</th><th>Neg Oracle</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
                     <tbody id="ret-trials-body"><tr><td colspan="10" style="color:#555">No retrieval trials yet</td></tr></tbody>
                 </table>
             </div>
@@ -641,7 +641,7 @@
             <div class="eval-metrics" id="e2e-metrics" style="display:none">
                 <div class="obs-stats">
                     <div class="stat"><span class="stat-value" id="e2e-pass-rate">—</span><span>Pass Rate</span></div>
-                    <div class="stat"><span class="stat-value" id="e2e-similarity">—</span><span>Avg Similarity</span></div>
+                    <div class="stat"><span class="stat-value" id="e2e-similarity">—</span><span>Avg. Cos Sim</span></div>
                     <div class="stat"><span class="stat-value" id="e2e-halluc-rate">—</span><span>Halluc. Pass</span></div>
                     <div class="stat"><span class="stat-value" id="e2e-fallbacks">—</span><span>Cite Fallbacks</span></div>
                     <div class="stat"><span class="stat-value" id="e2e-latency">—</span><span>Avg Latency</span></div>
@@ -656,7 +656,7 @@
             <h2 class="panel-title">E2E Trial History <span style="font-size:0.85rem;font-weight:normal;color:#aaa">— 3000 Token Context, 2048 Token Response</span></h2>
             <div class="trial-scroll">
                 <table class="trial-table" id="trials-table">
-                    <thead><tr><th>Embed Model</th><th>LLM</th><th>Pass Rate</th><th>Avg Sim</th><th>Halluc.</th><th>Fallbacks</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
+                    <thead><tr><th>Embed Model</th><th>LLM</th><th>Pass Rate</th><th>Avg. Cos Sim</th><th>Halluc.</th><th>Fallbacks</th><th>Latency</th><th>Queries</th><th></th></tr></thead>
                     <tbody id="trials-body"><tr><td colspan="9" style="color:#555">No E2E trials yet</td></tr></tbody>
                 </table>
             </div>
@@ -1342,6 +1342,7 @@
                         model: retEmbModel || "text-embedding-3-small",
                         eval_type: "retrieval",
                         avg_precision_at_5: s.avg_precision_at_5,
+                        avg_max_precision_at_5: s.avg_max_precision_at_5,
                         avg_recall_at_5: s.avg_recall_at_5,
                         avg_mrr: s.avg_mrr,
                         avg_ndcg_at_5: s.avg_ndcg_at_5,
@@ -1567,11 +1568,12 @@
             }
             // Find best values
             const vals = (key) => trials.map(t => t[key]).filter(v => v != null);
-            const bestP5 = Math.max(...vals("avg_precision_at_5"), -Infinity);
+            const p5Pcts = trials.map(t => t.avg_precision_at_5 != null && t.avg_max_precision_at_5 > 0 ? t.avg_precision_at_5 / t.avg_max_precision_at_5 : null).filter(v => v != null);
+            const bestP5Pct = Math.max(...p5Pcts, -Infinity);
             const bestR5 = Math.max(...vals("avg_recall_at_5"), -Infinity);
             const bestMRR = Math.max(...vals("avg_mrr"), -Infinity);
             const bestNDCG = Math.max(...vals("avg_ndcg_at_5"), -Infinity);
-            const bestNegOracle = Math.max(...vals("negative_oracle_pass_rate"), -Infinity);
+            const bestNegOracle = Math.min(...vals("negative_oracle_pass_rate"), Infinity);
             const dash = '<span class="trial-no-data">--</span>';
             const best = (val, target) => val != null && val === target ? ' class="trial-best"' : '';
             const fmtPct = (v) => v != null ? (v * 100).toFixed(0) + "%" : dash;
@@ -1585,7 +1587,7 @@
                 tr.innerHTML =
                     `<td class="trial-model">${embName}</td>` +
                     `<td>${dims}</td>` +
-                    `<td${best(t.avg_precision_at_5, bestP5)}>${fmt3(t.avg_precision_at_5)}</td>` +
+                    `<td${t.avg_precision_at_5 != null && t.avg_max_precision_at_5 > 0 && (t.avg_precision_at_5 / t.avg_max_precision_at_5) === bestP5Pct ? ' class="trial-best"' : ''}>${t.avg_precision_at_5 != null && t.avg_max_precision_at_5 > 0 ? Math.round((t.avg_precision_at_5 / t.avg_max_precision_at_5) * 100) + '% (' + t.avg_precision_at_5.toFixed(3) + '/' + t.avg_max_precision_at_5.toFixed(3) + ')' : fmt3(t.avg_precision_at_5)}</td>` +
                     `<td${best(t.avg_recall_at_5, bestR5)}>${fmt3(t.avg_recall_at_5)}</td>` +
                     `<td${best(t.avg_mrr, bestMRR)}>${fmt3(t.avg_mrr)}</td>` +
                     `<td${best(t.avg_ndcg_at_5, bestNDCG)}>${fmt3(t.avg_ndcg_at_5)}</td>` +
